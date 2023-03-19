@@ -17,5 +17,8 @@ randomly switch between german and english, sorry about that.
   - Aufs Dach Solarzelle (siehe unter Solar)
 * Solar zur Stromversorgung
   - [Solarmodul-Solarladegeraet-Set](https://www.amazon.de/-/dp/B07RZBVTGR/) "20W" (wers glaubt wird selig)
+  - solar panel
+    + outer dimensions: 406 x 340 mm
+    + has 4 holes for mounting at the bottom of the frame, 9 mm x 6mm (rounded), so it will be very easy to screw this onto the wodden roof.
   - alter Bleiakku (AGM) - ist vielleicht nicht mehr gut genug und wir brauchen nen neuen. Andererseits muss er nur ein paar Tage halten und kriegt voraussichtlich ja fast taeglich Sonne.
 
