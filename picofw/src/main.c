@@ -1,5 +1,6 @@
 #include <hardware/adc.h>
 #include <hardware/rtc.h>
+#include <hardware/sync.h>
 //#include <hardware/watchdog.h>
 #include <pico/stdlib.h>
 #include <stdlib.h>
@@ -14,19 +15,20 @@
 #define STOP_BITS 1
 #define PARITY    UART_PARITY_NONE
 
-/* for now we use UART1 on GPIO-pins 4 to 7.
+/* we use UART1 on GPIO-pins 4 to 7.
  * There are a few options here, including but not
  * limited to: UART0 on 0 to 3; UART1 on 4 to 7; UART1 on 8 to 11; UART0 on 12 to 15; */
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
 #define UART_CTS_PIN 6
 #define UART_RTS_PIN 7
+/* We also need I/O pins to connect to power and reset pins for the ublox module. */
 #define POWER_PIN 0
 #define RESET_PIN 1
 
-volatile char serialinbuf[500];
+char serialinbuf[500];
 volatile int serialinbufrpos = 0;
-volatile int serialinbufwpos = 0;
+int serialinbufwpos = 0; /* this is ONLY used by the IRQ routine */
 volatile int linesavailable = 0;
 
 /* Interrupt routine, called when there is a byte on the serial UART */
@@ -48,7 +50,10 @@ void on_uart_rx(void) {
 void getserialline(char * buf) {
   int rpos = 0;
   if (linesavailable > 0) {
+    uint32_t irqs = save_and_disable_interrupts();
+    /* This obviously must not execute in parallel with the IRQ routine. */
     linesavailable--;
+    restore_interrupts(irqs);
     while (serialinbuf[serialinbufrpos] != '\n') {
       buf[rpos] = serialinbuf[serialinbufrpos];
       serialinbufrpos = (serialinbufrpos + 1) % sizeof(serialinbuf);
@@ -120,17 +125,22 @@ int waitforatreplywto(uint8_t * buf, int buflen, float timeout)
   return -1;
 }
 
+/* Sends data out the serial port.
+ * Linefeeds need to be included in line! */
+void sendserialline(uint8_t * line)
+{
+  uart_write_blocking(UART_ID, line, strlen(line));
+}
+
+/*
+ * sends an AT command to the LTE module, and waits for it to return a reply,
+ * whether it be an OK or an ERROR. With timeout.
+ */
 int sendatcmd(uint8_t * cmd, float timeout)
 {
   uint8_t rcvbuf[300];
-  while (uart_is_readable(UART_ID)) {
-    uint8_t c = uart_getc(UART_ID);
-    printf("Warning: clearing unread byte from RX queue: %02x\n", c);
-  }
   sprintf(rcvbuf, "%s\r\n", cmd);
-  //printf("Before crappy PICO-SDK function: '%s'\n", rcvbuf);
-  uart_write_blocking(UART_ID, rcvbuf, strlen(rcvbuf));
-  //printf("After crappy PICO-SDK function.\n");
+  sendserialline(rcvbuf);
   int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), timeout);
   printf("Sent '%s', Received serial: error=%s, Text '%s'\n", cmd, ((res < 0) ? "Yes" : "No"), rcvbuf);
 }
@@ -141,9 +151,9 @@ int sendatcmd(uint8_t * cmd, float timeout)
 int readnetworkstate(void)
 {
   uint8_t rcvbuf[300];
-  sprintf(rcvbuf, "%s\r\n", "AT+COPS?");
   printf("...readnetworkstate: sending AT+COPS?\n");
-  uart_write_blocking(UART_ID, rcvbuf, strlen(rcvbuf));
+  sprintf(rcvbuf, "%s\r\n", "AT+COPS?");
+  sendserialline(rcvbuf);
   int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), 0.5);
   if (res <= 0) { return -2; }
   printf("...readnetworkstate: read %s\n", rcvbuf);
@@ -167,7 +177,11 @@ int readnetworkstate(void)
   return -1;
 }
 
-void waitfornetwork(float timeout)
+/* Tries to wait until the mobile network has a data connection, with a timeout.
+ * This will also automatically handle the case where the module did a
+ * fallback to 2G, in which case we have to send an extra command to
+ * enable the GPRS data connection. */
+void mn_waitfornetworkconn(float timeout)
 {
   int nws;
   absolute_time_t toend = make_timeout_time_ms(timeout * 1000.0);
@@ -180,7 +194,7 @@ void waitfornetwork(float timeout)
       /* we have a valid network connection. */
       if (nws == 3) { /* GPRS */
         /* GPRS requires manual context activation, LTE does it automatically */
-        printf("GPRS connection, sending AT+CGACT=1,1...\n");
+        printf("GPRS connection detected, sending AT+CGACT=1,1...\n");
         sendatcmd("AT+CGACT=1,1", 30.0);
       }
       return;
@@ -188,22 +202,122 @@ void waitfornetwork(float timeout)
   } while (absolute_time_diff_us(get_absolute_time(), toend) > 0);
 }
 
+void mn_resolvedns(uint8_t * hostname, uint8_t * obuf, int obufsize, float timeout)
+{
+  uint8_t buf[500];
+  sprintf(buf, "AT+UDNSRN=0,\"%s\"\r\n", hostname);
+  sendserialline(buf);
+  int res = waitforatreplywto(buf, sizeof(buf), timeout);
+  if (res <= 0) { /* No success or failure within timeout */
+    strcpy(obuf, "");
+    return;
+  }
+  char * sp1;
+  char * st1 = strtok_r(buf, "\n", &sp1);
+  do {
+    if (strncmp(st1, "+UDNSRN: \"", 10) == 0) {
+      /* This is the line containing the answer */
+      int bufpos = 10;
+      while ((st1[bufpos] != 0) && (obufsize > 1)) {
+        if (st1[bufpos] == '"') { /* The " marks the end of the IP */
+          break;
+        }
+        /* Copy one char and advance to next */
+        *obuf = st1[bufpos];
+        obufsize--;
+        bufpos++;
+      }
+      *obuf = 0;
+      return;
+    }
+    st1 = strtok_r(NULL, "\n", &sp1);
+  } while (st1 != NULL);
+  /* No DNS reply found in output. Return empty string to signal the error. */
+  strcpy(obuf, "");
+}
+
+/* Closes a socket number.
+ * This does not care about errors, and it uses the asynchronous version of
+ * the command, because we really don't care and don't want to wait for a reply.
+ * The reply will come at some later time in the form of an URC and will be
+ * ignored anyways.
+ */
+void mn_closesocket(int socketnr)
+{
+  uint8_t buf[80];
+  sprintf(buf, "AT+USOCL=%d,1\r\n", socketnr);
+  sendserialline(buf);
+}
+
+/* Opens a TCP connection to hostname on port.
+ * returns a socket number (should be between 0 and 6 because the module can
+ * only create 7 sockets at a time), or <0 on error. */
+int mn_opentcpconn(uint8_t * hostname, uint16_t port, float timeout)
+{
+  uint8_t buf[500];
+  uint8_t ipasstring[42];
+  int socket = -1;
+  mn_resolvedns(hostname, ipasstring, sizeof(ipasstring), timeout);
+  if (strlen(ipasstring) < 4) { /* DNS resolution failed */
+    return -1;
+  }
+  sendserialline("AT+USOCR=6\r\n"); /* Get a TCP socket with random local port */
+  int res = waitforatreplywto(buf, sizeof(buf), timeout);
+  if (res <= 0) { return -2; }
+  char * sp1;
+  char * st1 = strtok_r(buf, "\n", &sp1);
+  do {
+    if (strncmp(st1, "+USOCR: ", 8) == 0) {
+      /* This is the line containing the Socket ID */
+      socket = strtol(&st1[8], NULL, 10);
+      break;
+    }
+    st1 = strtok_r(NULL, "\n", &sp1);
+  } while (st1 != NULL);
+  if (socket < 0) { /* no valid socket in +USOCR line, or no +USOCR at all. */
+    return -3;
+  }
+  /* Now connect that socket with the connect command */
+  sprintf(buf, "AT+USOCO=%d,\"%s\",%u,0\r\n", socket, ipasstring, port);
+  sendserialline(buf);
+  res = waitforatreplywto(buf, sizeof(buf), timeout);
+  if (res <= 0) { /* We ran into timeout. */
+    /* Try to not leave a mess behind, send command to close the socket */
+    mn_closesocket(socket);
+    return -4;
+  }
+  /* look for "OK", otherwise close socket again */
+  st1 = strtok_r(buf, "\n", &sp1);
+  do {
+    if (strncmp(st1, "OK", 2) == 0) { /* We received an "OK"! */
+      /* The socket should now be connected. */
+      return socket;
+    }
+    st1 = strtok_r(NULL, "\n", &sp1);
+  } while (st1 != NULL);
+  /* If we reach this, there was some error connecting the socket.
+   * Free the socket number by closing it (asynchronously). */
+  mn_closesocket(socket);
+  return -5;
+}
+
 void wakeltemodule(void)
 {
-    /* Note: The PWR pin is inverted on the click board - so we need to pull
-     * it high for enabling it. */
-    gpio_put(POWER_PIN, true);
-    sleep_ms(500);
-    gpio_put(POWER_PIN, false);
+  /* Note: The PWR pin is inverted on the click board - so we need to pull
+   * it high for enabling it even though it's low active according to
+   * R412M documentation. */
+  gpio_put(POWER_PIN, true);
+  sleep_ms(500);
+  gpio_put(POWER_PIN, false);
 }
 
 void resetltemodule(void)
 {
-    /* Note: The PWR pin is inverted on the click board - so we need to pull
-     * it high for enabling it. */
-    gpio_put(RESET_PIN, true);
-    sleep_ms(500);
-    gpio_put(RESET_PIN, false);
+  /* Note: The Reset pin is inverted on the click board - so we need to pull
+   * it high for enabling it. */
+  gpio_put(RESET_PIN, true);
+  sleep_ms(500);
+  gpio_put(RESET_PIN, false);
 }
 
 int main(void)
@@ -252,8 +366,8 @@ int main(void)
      * with a duration of 1.5s on this pin will power the module down." - so
      * Unfortunately, this does not seem to work reliably for guaranteeing
      * a reset. So we also cabled the reset pin. */
-    wakeltemodule();
     resetltemodule();
+    wakeltemodule();
     
     printf("Sleeping for a bit to allow things to come up...\r\n");
 
@@ -261,7 +375,7 @@ int main(void)
     sleep_ms(6000);
 
     /* Send some commands to the IoT 6 click (uBlox Sara-R412M) module */
-#if 0 /* one-off LTE module setup */
+#if 1 /* one-off LTE module setup */
     /* These are settings that are saved in the NVRAM of the module, so
      * there is no need to execute these every time, just once on first
      * time setup. */
@@ -278,21 +392,41 @@ int main(void)
     // reboot to make that take effect
     sendatcmd("AT+CFUN=15", 4.0);
     // FIXME: hardware flow control always gets stuck after the reboot.
-    sleep_ms(8000);
+    sleep_ms(1000);
+    resetltemodule();
+    wakeltemodule();
+    sleep_ms(6000);
     printf("slept.\n");
     sendatcmd("AT", 4.0);
     // disconnect from network, needed for the following
     sendatcmd("AT+CFUN=0", 10.0);
-    // configure context (we only use one, nr. 1, the module could handle up to 8)
-    sendatcmd("AT+CGDCONT=1,\"IPV4V6\",\"resiot.m2m\"", 10.0);
+    /* configure context (we only use one, nr. 1, the module could handle up to 8)
+     * So obviously, it's tempting to say "IPV4V6" here, and expect the R412M
+     * to do something sane: Try to use IPv6, or IPv4, whatever is available
+     * from the network, we really don't care. However, that is not what the
+     * module does in this mode. What "IPV4V6" seems to mean for u-blox is
+     * "Try to use both IPv4 and IPv6, and break completely unless BOTH are
+     * available, throwing nonsense-error-messages on every command
+     * attempting to use the network". Great work, u-blox, great work.
+     * So it's 2023 and we have to resort to IPv4 only because we
+     * simply cannot guarantee to always have IPv6 available in every
+     * network. */
+    sendatcmd("AT+CGDCONT=1,\"IP\",\"resiot.m2m\"", 10.0);
     // reboot again to make that take effect
-    //sendatcmd("AT+CFUN=15", 4.0);
-    sleep_ms(8000);
+    sendatcmd("AT+CFUN=15", 4.0);
+    sleep_ms(1000);
+    resetltemodule();
+    wakeltemodule();
+    sleep_ms(6000);
+    printf("slept.\n");
     sendatcmd("AT", 4.0);
     // disconnect from network, needed for the following
     sendatcmd("AT+CFUN=0", 10.0);
-    // we want to enable IPv4+IPv6
-    sendatcmd("AT+UPSD=0,0,3", 10.0);
+    // we would want to enable IPv4+IPv6, but we can't -
+    // see comment above AT+CGDCONT. So we enable IPv4 only.
+    sendatcmd("AT+UPSD=0,0,0", 10.0);
+    // dynamic IP
+    sendatcmd("AT+UPSD=0,7,\"0.0.0.0\"", 10.0);
     // servicedomain: CS (voice), PS (data) or both. Should already
     // default to PS due to our european MNOPROFILE.
     sendatcmd("AT+USVCDOMAIN=1", 10.0);
@@ -303,7 +437,10 @@ int main(void)
     sendatcmd("AT+UCUSATA=4", 4.0);
     // reboot again to make that take effect
     sendatcmd("AT+CFUN=15", 4.0);
-    sleep_ms(8000);
+    sleep_ms(1000);
+    resetltemodule();
+    wakeltemodule();
+    sleep_ms(6000);
 #endif /* one-off LTE module setup */
     // Possibly useful for later: The module has a RTC - command AT+CCLK
     // Just send an "AT", so the module can see and set the correct baudrate.\r\n");
@@ -312,14 +449,21 @@ int main(void)
     // they really aren't what anybody in his right mind would call
     // verbose...
     sendatcmd("AT+CMEE=2", 4.0);
-    // Show a bunch of info about the module
+    // Set in- and output of socket functions to hex-encoded, so we don't need
+    // to deal with escaping special characters.
+    sendatcmd("AT+UDCONF=1,1", 4.0);
+    // Show a bunch of info about the mobile network module
     sendatcmd("ATI", 4.0);
-    // wait for network connection (but with timeout)
-    waitfornetwork(60.0);
+    /* wait for network connection (but with timeout).
+     * We don't really care if this succeeds or not, we'll just try to send
+     * data anyways. */
+    mn_waitfornetworkconn(60.0);
     // select active profile
     sendatcmd("AT+UPSD=0,100,1", 15.0);
-    // try non-async DNS resolution
-    sendatcmd("AT+UDNSRN=0,\"www.poempelfox.de\",0,1", 30.0);
+    // Query status info
+    sendatcmd("AT+CGACT?", 4.0);
+    // Lets open a network connection
+    int sock = mn_opentcpconn("wetter.poempelfox.de", 80, 30.0);
 
     /* Main loop */
     do {
