@@ -22,11 +22,10 @@
 #define UART_RX_PIN 5
 #define UART_CTS_PIN 6
 #define UART_RTS_PIN 7
-/* We also need I/O pins to connect to power and reset pins for the ublox module. */
+/* We also need an I/O to connect to the "power on" pin of the ublox module. */
 #define POWER_PIN 0
-#define RESET_PIN 1
 
-char serialinbuf[500];
+volatile char serialinbuf[300];
 volatile int serialinbufrpos = 0;
 int serialinbufwpos = 0; /* this is ONLY used by the IRQ routine */
 volatile int linesavailable = 0;
@@ -35,9 +34,9 @@ volatile int linesavailable = 0;
 void on_uart_rx(void) {
   while (uart_is_readable(UART_ID)) {
     uint8_t ch = uart_getc(UART_ID);
-    if (ch == '\r') { ch = '\n'; }
+    //printf("%c (%02x)", ((ch == 0) ? ' ' : ch), ch);
+    if (ch == '\r') continue;
     if (ch == 0) continue;
-    //printf("%c (%02x)", ch, ch);
     serialinbuf[serialinbufwpos] = ch;
     serialinbufwpos = (serialinbufwpos + 1) % sizeof(serialinbuf);
     if (ch == '\n') {
@@ -47,11 +46,20 @@ void on_uart_rx(void) {
   }
 }
 
+int getlinesavailable(void)
+{
+  int res;
+  uint32_t irqs = save_and_disable_interrupts();
+  res = linesavailable;
+  restore_interrupts(irqs);
+  return res;
+}
+
 void getserialline(char * buf) {
   int rpos = 0;
-  if (linesavailable > 0) {
-    uint32_t irqs = save_and_disable_interrupts();
+  if (getlinesavailable() > 0) {
     /* This obviously must not execute in parallel with the IRQ routine. */
+    uint32_t irqs = save_and_disable_interrupts();
     linesavailable--;
     restore_interrupts(irqs);
     while (serialinbuf[serialinbufrpos] != '\n') {
@@ -65,15 +73,15 @@ void getserialline(char * buf) {
     //printf("getserialline returning: '%s' rpos now %d wpos %d\n", buf, serialinbufrpos, serialinbufwpos);
     return;
   } else {
-    printf("Warning: Calling getserialline but no line is available.\n");
+    printf("Warning: Calling getserialline but no line is available.\r\n");
     buf[0] = 0;
     return;
   }
 }
 
 /* Read serial line with timeout.
- * This stops reading on a \r or \n, or after a timeout. The \r or \n
- * are NOT in the returned string.
+ * This stops reading on a \n, or after a timeout. The \n is NOT in the
+ * returned string.
  * Returns: number of bytes read, or <0 on error.
  * valid errors are: -1 timeout hit, -2 buffer too small.
  */
@@ -82,13 +90,18 @@ int readseriallinewto(uint8_t * buf, int buflen, float timeout)
   int res = 0;
   absolute_time_t toend = make_timeout_time_ms(timeout * 1000.0);
   if (buflen <= 1) { return -2; }
+  int ctr = 0;
   do {
-    if (linesavailable > 0) {
+    if (ctr > 79) { printf("\r\n"); ctr = 0; }
+    printf("_"); fflush(stdout); sleep_ms(10);
+    ctr++;
+    if (getlinesavailable() > 0) {
       getserialline(buf);
       return strlen(buf);
     }
     /* best_effort_wfe_or_timeout returns true if timeout is hit. */
-  } while (best_effort_wfe_or_timeout(toend) == false);
+  } while (time_reached(toend) == false);
+  //} while (best_effort_wfe_or_timeout(toend) == false);
   buf[res] = 0;
   return -1;
 }
@@ -129,7 +142,33 @@ int waitforatreplywto(uint8_t * buf, int buflen, float timeout)
  * Linefeeds need to be included in line! */
 void sendserialline(uint8_t * line)
 {
-  uart_write_blocking(UART_ID, line, strlen(line));
+  // This is a modified implementation of uart_write_blocking, with the
+  // modification being that we are not braindead, and therefore ADD A FSCKING
+  // TIMEOUT so we don't loop indefinitely on a port that became stuck.
+  //uart_write_blocking(UART_ID, line, strlen(line));
+  static int lastwritetimedout = 0;
+  size_t len = strlen(line);
+  for (size_t i = 0; i < len; i++) {
+    if (lastwritetimedout > 0) {
+      if (uart_is_writable(UART_ID)) { /* It's writeable again, so reset the state "It's broken" */
+        lastwritetimedout = 0;
+        printf("sendserialline: port seems to work again.\r\n");
+      }
+    } else {
+      absolute_time_t toend = make_timeout_time_ms(10.0 * 1000.0);
+      while (!uart_is_writable(UART_ID)) {
+        if (time_reached(toend)) {
+          lastwritetimedout = 1; /* Mark it as broken, so we don't wait again on the next byte. */
+          printf("sendserialline: port seems to be broken.\r\n");
+          break;
+        }
+      }
+    }
+    if (lastwritetimedout == 0) {
+      uart_get_hw(UART_ID)->dr = *line;
+      line++;
+    }
+  }
 }
 
 /*
@@ -138,9 +177,13 @@ void sendserialline(uint8_t * line)
  */
 int sendatcmd(uint8_t * cmd, float timeout)
 {
-  uint8_t rcvbuf[300];
+  uint8_t rcvbuf[500];
+  printf("sendatcmd: about to send '%s'\r\n", cmd);
+  sleep_ms(101);
   sprintf(rcvbuf, "%s\r\n", cmd);
   sendserialline(rcvbuf);
+  printf("...sent\r\n");
+  sleep_ms(101);
   int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), timeout);
   printf("Sent '%s', Received serial: error=%s, Text '%s'\n", cmd, ((res < 0) ? "Yes" : "No"), rcvbuf);
 }
@@ -301,23 +344,154 @@ int mn_opentcpconn(uint8_t * hostname, uint16_t port, float timeout)
   return -5;
 }
 
+/* Attempts to write data to a network socket.
+ * Errors are just silently ignored.
+ */
+void mn_writesock(int socket, uint8_t * buf, int bufsize, float timeout)
+{
+  if (socket < 0) { return; }
+  if (bufsize <= 0) { return; }
+  while (bufsize > 0) {
+    int bts = bufsize;
+    char wrstr[400];
+    if (bts > 128) { bts = 128; /* Write at most 128 bytes at once. */ }
+    sprintf(wrstr, "AT+USOWR=%d,%d,\"", socket, bts);
+    for (int i = 0; i < bts; i++) {
+      char prch[3]; int nib;
+      nib = ((*buf) >> 4) & 0x0f;
+      if (nib <= 9) {
+        prch[0] = '0' + nib;
+      } else {
+        prch[0] = 'a' + nib;
+      }
+      nib = ((*buf) >> 0) & 0x0f;
+      if (nib <= 9) {
+        prch[1] = '0' + nib;
+      } else {
+        prch[1] = 'a' + nib;
+      }
+      prch[2] = 0;
+      strcat(wrstr, prch);
+      buf++; /* Advance to next position in buffer */
+    }
+    strcat(wrstr, "\"\r\n");
+    sendatcmd(wrstr, timeout);
+    bufsize -= bts; /* Update size of remaining buffer */
+  }
+}
+
+/* Attempts to read data from a network socket.
+ * Returns: Number of bytes actually read.
+ */
+int mn_readsock(int socket, uint8_t * buf, int bufsize, float timeout)
+{
+  int res = 0;
+  if (socket < 0) { return res; }
+  while (bufsize > 0) {
+    int btr = bufsize;
+    char rdstr[400];
+    if (btr > 128) { btr=128; /* Read at most 128 bytes at once. */ }
+    sprintf(rdstr, "AT+USORD=%d,%d", socket, btr);
+    sendserialline(rdstr);
+    int rc = waitforatreplywto(rdstr, sizeof(rdstr), timeout);
+    if (rc <= 0) break;
+    char * sp1;
+    char * st1 = strtok_r(rdstr, "\n", &sp1);
+    do {
+      if (strncmp(st1, "+USORD: ", 8) == 0) {
+        /* This contains the read output. */
+        int riti = 0; /* # bytes read in this iteration */
+        char * rp = st1 + 8;
+        /* We could check the socket id in the reply, but since we're using
+         * this in blocking mode it's not strictly needed.
+         * So we just skip ahead to the '"'. */
+        while ((*rp != '"') && (*rp != 0)) { rp++; }
+        if (*rp == 0) { // End of the string and no '"'.
+          /* That also means we did read 0 bytes, and thus abort reading here. */
+          return res;
+        }
+        rp++;
+        while ((*rp != '"') && (*rp != 0)) { // Loop until end of string.
+          unsigned int b;
+          if (sscanf(rp, "%2x", &b) == 1) { // Try to read 2 bytes as hex
+            *buf = b & 0xff;
+            buf++;
+            bufsize--;
+            riti++;
+            res++;
+          } else { // Reading 2 bytes as hex failed. Abort here.
+            break;
+          }
+        }
+        if (riti == 0) { // 0 bytes read in this iteration. End reading.
+          return res;
+        }
+      }
+      st1 = strtok_r(NULL, "\n", &sp1);
+    } while (st1 != NULL);
+  }
+  return res;
+}
+
 void wakeltemodule(void)
 {
   /* Note: The PWR pin is inverted on the click board - so we need to pull
    * it high for enabling it even though it's low active according to
    * R412M documentation. */
+  /* The data sheet says that this needs to be pulled for 0.15 to 3.2 seconds.
+   * Which of course directly contradicts the next line, where it says that
+   * more than 1.5 seconds will turn it off. */
   gpio_put(POWER_PIN, true);
-  sleep_ms(500);
+  sleep_ms(600);
   gpio_put(POWER_PIN, false);
 }
 
+/* From the MIKROE docs: "If the device is already powered up, a LOW pulse
+ * with a duration of 1.5s on this pin will power the module down.".
+ * Unfortunately, this did not seem to work reliably for guaranteeing
+ * a reset. So we tried cabling the reset pin.
+ * Then we read that this cannot be used either, because is only intended
+ * "for emergencies", and can break the module. It also would need to be
+ * pulled for 10 whole seconds. This module is one absolute mess. */
+#if 0
 void resetltemodule(void)
 {
   /* Note: The Reset pin is inverted on the click board - so we need to pull
    * it high for enabling it. */
   gpio_put(RESET_PIN, true);
-  sleep_ms(500);
+  sleep_ms(1000);
   gpio_put(RESET_PIN, false);
+}
+
+/* Tries to trigger a shutdown of the LTE module. You will need to sleep for
+ * a moment after issuing this, because it only triggers the shutdown, and that
+ * might take a while.
+ * Unfortunately, this simply does not work. The module just completely
+ * ignores it, or sees it as poweron. */
+void poweroffltemodule(void)
+{
+  gpio_put(POWER_PIN, true);
+  sleep_ms(3300);
+  gpio_put(POWER_PIN, false);
+}
+#endif
+
+void waitforltemoduleready(void)
+{
+  uint8_t buf[500];
+  /* Timeout is 7.5 because specification says it may need at most 5 seconds
+   * to come up. */
+  int res;
+  do {
+    res = readseriallinewto(buf, sizeof(buf), 7.5);
+    if (res >= 19) {
+      if (strncmp(buf, "LTEmodule now ready", 19) == 0) {
+        printf("LTEmodule reported ready.\r\n");
+        return;
+      }
+    }
+  } while (res > 0);
+  printf("Timed out waiting for LTEmodule to become ready.\r\n");
 }
 
 int main(void)
@@ -346,7 +520,7 @@ int main(void)
     uart_set_hw_flow(UART_ID, true, true);
     /* set the rest of the parameters */
     uart_set_format(UART_ID, DATA_BITS, STOP_BITS, PARITY);
-    uart_set_fifo_enabled(UART_ID, true);
+    uart_set_fifo_enabled(UART_ID, false);
     uart_set_translate_crlf(UART_ID, false);
     // set up and enable UART RX interrupt handler
     irq_set_exclusive_handler(UART_IRQ, on_uart_rx);
@@ -355,27 +529,24 @@ int main(void)
     uart_set_irq_enables(UART_ID, true, false);
     /* Configure the GPIOs for PWR / RST of the LTE module */
     gpio_init(POWER_PIN);
+    gpio_put(POWER_PIN, false);
     gpio_set_dir(POWER_PIN, GPIO_OUT);
     gpio_set_drive_strength(POWER_PIN, GPIO_DRIVE_STRENGTH_4MA);
-    gpio_put(POWER_PIN, false);
-    gpio_init(RESET_PIN);
-    gpio_set_dir(RESET_PIN, GPIO_OUT);
-    gpio_set_drive_strength(RESET_PIN, GPIO_DRIVE_STRENGTH_4MA);
-    gpio_put(RESET_PIN, false);
-    /* From the MIKROE page: "If the device is already powered up, a LOW pulse
-     * with a duration of 1.5s on this pin will power the module down." - so
-     * Unfortunately, this does not seem to work reliably for guaranteeing
-     * a reset. So we also cabled the reset pin. */
-    resetltemodule();
-    wakeltemodule();
+    //printf("LTE poweroff...\r\n");
+    //poweroffltemodule();
+    //sleep_ms(10000);
     
-    printf("Sleeping for a bit to allow things to come up...\r\n");
+    printf("LTE poweron...\r\n");
+    wakeltemodule();
 
-    /* According to u-blox docs, the module takes up to 5 seconds to power up. */
-    sleep_ms(6000);
+    printf("Sleeping for a tiny bit to allow things to come up...\r\n");
+    sleep_ms(1000);
 
     /* Send some commands to the IoT 6 click (uBlox Sara-R412M) module */
-#if 1 /* one-off LTE module setup */
+#if 0 /* one-off LTE module setup */
+    /* According to u-blox docs, the module takes up to 5 seconds to power up. */
+    sleep_ms(5000); /* NOTE: we cannot waitforltemoduleready here, because
+     * the configuration AT+CSGT may not have been executed yet. */
     /* These are settings that are saved in the NVRAM of the module, so
      * there is no need to execute these every time, just once on first
      * time setup. */
@@ -391,12 +562,7 @@ int main(void)
     sendatcmd("AT+UMNOPROF=100", 4.0);
     // reboot to make that take effect
     sendatcmd("AT+CFUN=15", 4.0);
-    // FIXME: hardware flow control always gets stuck after the reboot.
-    sleep_ms(1000);
-    resetltemodule();
-    wakeltemodule();
-    sleep_ms(6000);
-    printf("slept.\n");
+    waitforltemoduleready();
     sendatcmd("AT", 4.0);
     // disconnect from network, needed for the following
     sendatcmd("AT+CFUN=0", 10.0);
@@ -414,11 +580,7 @@ int main(void)
     sendatcmd("AT+CGDCONT=1,\"IP\",\"resiot.m2m\"", 10.0);
     // reboot again to make that take effect
     sendatcmd("AT+CFUN=15", 4.0);
-    sleep_ms(1000);
-    resetltemodule();
-    wakeltemodule();
-    sleep_ms(6000);
-    printf("slept.\n");
+    waitforltemoduleready();
     sendatcmd("AT", 4.0);
     // disconnect from network, needed for the following
     sendatcmd("AT+CFUN=0", 10.0);
@@ -437,14 +599,13 @@ int main(void)
     sendatcmd("AT+UCUSATA=4", 4.0);
     // reboot again to make that take effect
     sendatcmd("AT+CFUN=15", 4.0);
-    sleep_ms(1000);
-    resetltemodule();
-    wakeltemodule();
-    sleep_ms(6000);
 #endif /* one-off LTE module setup */
+    waitforltemoduleready();
     // Possibly useful for later: The module has a RTC - command AT+CCLK
     // Just send an "AT", so the module can see and set the correct baudrate.\r\n");
     sendatcmd("AT", 4.0);
+    // Do not echo back commands.
+    sendatcmd("ATE0", 4.0);
     // Tell the module to send "verbose" error messages, even though
     // they really aren't what anybody in his right mind would call
     // verbose...
@@ -464,6 +625,15 @@ int main(void)
     sendatcmd("AT+CGACT?", 4.0);
     // Lets open a network connection
     int sock = mn_opentcpconn("wetter.poempelfox.de", 80, 30.0);
+    if (sock >= 0) {
+      char tst[500]; int br;
+      strcpy(tst, "GET /getlastvalue/11 HTTP/1.1\r\nHost: wetter.poempelfox.de\r\nConnection: close");
+      mn_writesock(sock, tst, strlen(tst), 30.0);
+      while ((br = (mn_readsock, tst, sizeof(tst) - 1, 30.0)) > 0) {
+        tst[br] = 0;
+        printf("Received HTTP reply: %s\r\n", tst);
+      }
+    }
 
     /* Main loop */
     do {
