@@ -25,16 +25,26 @@
 /* We also need an I/O to connect to the "power on" pin of the ublox module. */
 #define POWER_PIN 0
 
-volatile char serialinbuf[300];
+volatile char serialinbuf[200];
 volatile int serialinbufrpos = 0;
 int serialinbufwpos = 0; /* this is ONLY used by the IRQ routine */
 volatile int linesavailable = 0;
 
 /* Interrupt routine, called when there is a byte on the serial UART */
 void on_uart_rx(void) {
+  static int hadwrapprint = 0;
+  // FIXME handle wrap around
   while (uart_is_readable(UART_ID)) {
     uint8_t ch = uart_getc(UART_ID);
     //printf("%c (%02x)", ((ch == 0) ? ' ' : ch), ch);
+    if ((linesavailable > 0) && (serialinbufwpos == serialinbufrpos)) {
+      // We've wrapped around, and would now override the unread buffer!
+      if (hadwrapprint == 0) {
+        printf("!!! uart_RX buffer overrun !!!\r\n");
+        hadwrapprint = 1;
+      }
+      continue;
+    }
     if (ch == '\r') continue;
     if (ch == 0) continue;
     serialinbuf[serialinbufwpos] = ch;
@@ -55,7 +65,7 @@ int getlinesavailable(void)
   return res;
 }
 
-void getserialline(char * buf) {
+void getserialline(char * buf, int buflen) {
   int rpos = 0;
   if (getlinesavailable() > 0) {
     /* This obviously must not execute in parallel with the IRQ routine. */
@@ -64,8 +74,11 @@ void getserialline(char * buf) {
     restore_interrupts(irqs);
     while (serialinbuf[serialinbufrpos] != '\n') {
       buf[rpos] = serialinbuf[serialinbufrpos];
+      if ((rpos + 1) < buflen) { /* Do not write past end of buffer (instead
+        * overwrite last character over and over)  */
+        rpos++;
+      }
       serialinbufrpos = (serialinbufrpos + 1) % sizeof(serialinbuf);
-      rpos++;
     }
     /* Advance to the next position for the next read */
     serialinbufrpos = (serialinbufrpos + 1) % sizeof(serialinbuf);
@@ -90,18 +103,17 @@ int readseriallinewto(uint8_t * buf, int buflen, float timeout)
   int res = 0;
   absolute_time_t toend = make_timeout_time_ms(timeout * 1000.0);
   if (buflen <= 1) { return -2; }
-  int ctr = 0;
+  //int ctr = 0;
   do {
-    if (ctr > 79) { printf("\r\n"); ctr = 0; }
-    printf("_"); fflush(stdout); sleep_ms(10);
-    ctr++;
+    //if (ctr > 79) { printf("\r\n"); ctr = 0; }
+    //printf("_"); fflush(stdout); sleep_ms(10);
+    //ctr++;
     if (getlinesavailable() > 0) {
-      getserialline(buf);
+      getserialline(buf, buflen);
       return strlen(buf);
     }
     /* best_effort_wfe_or_timeout returns true if timeout is hit. */
-  } while (time_reached(toend) == false);
-  //} while (best_effort_wfe_or_timeout(toend) == false);
+  } while (best_effort_wfe_or_timeout(toend) == false);
   buf[res] = 0;
   return -1;
 }
@@ -117,14 +129,14 @@ int waitforatreplywto(uint8_t * buf, int buflen, float timeout)
   int lastreadrc = 0;
   uint8_t * cptr = &buf[res];
   do {
-    lastreadrc = readseriallinewto(cptr, buflen - res, timeout);
+    lastreadrc = readseriallinewto(cptr, buflen - res - 1, timeout);
     if (lastreadrc > 0) {
       res += lastreadrc;
       /* Is this either "OK" or "ERROR" or "+CME ERROR.*"? Then this
        * is the end of the reply to the last AT command. */
       if ((strcmp(cptr, "OK") == 0)
        || (strcmp(cptr, "ERROR") == 0)
-       || (strncmp(cptr, "+CME ERROR", 9) == 0)) {
+       || (strncmp(cptr, "+CME ERROR", 10) == 0)) {
         return res;
       }
       if ((res + 1) < buflen) {
@@ -145,21 +157,21 @@ void sendserialline(uint8_t * line)
   // This is a modified implementation of uart_write_blocking, with the
   // modification being that we are not braindead, and therefore ADD A FSCKING
   // TIMEOUT so we don't loop indefinitely on a port that became stuck.
-  //uart_write_blocking(UART_ID, line, strlen(line));
+  printf("sendserialline: '%s'\r\n", line); fflush(stdout);
   static int lastwritetimedout = 0;
   size_t len = strlen(line);
   for (size_t i = 0; i < len; i++) {
     if (lastwritetimedout > 0) {
       if (uart_is_writable(UART_ID)) { /* It's writeable again, so reset the state "It's broken" */
         lastwritetimedout = 0;
-        printf("sendserialline: port seems to work again.\r\n");
+        printf("sendserialline: port seems to work again.\r\n"); fflush(stdout);
       }
     } else {
       absolute_time_t toend = make_timeout_time_ms(10.0 * 1000.0);
       while (!uart_is_writable(UART_ID)) {
         if (time_reached(toend)) {
           lastwritetimedout = 1; /* Mark it as broken, so we don't wait again on the next byte. */
-          printf("sendserialline: port seems to be broken.\r\n");
+          printf("sendserialline: port seems to be broken.\r\n"); fflush(stdout);
           break;
         }
       }
@@ -177,15 +189,16 @@ void sendserialline(uint8_t * line)
  */
 int sendatcmd(uint8_t * cmd, float timeout)
 {
-  uint8_t rcvbuf[500];
-  printf("sendatcmd: about to send '%s'\r\n", cmd);
-  sleep_ms(101);
+  uint8_t rcvbuf[250];
+  //printf("sendatcmd: about to send '%s'\r\n", cmd);
+  //sleep_ms(101);
   sprintf(rcvbuf, "%s\r\n", cmd);
   sendserialline(rcvbuf);
-  printf("...sent\r\n");
-  sleep_ms(101);
+  //printf("...sent\r\n");
+  //sleep_ms(101);
   int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), timeout);
-  printf("Sent '%s', Received serial: error=%s, Text '%s'\n", cmd, ((res < 0) ? "Yes" : "No"), rcvbuf);
+  printf("sendatcmd: Sent '%s', Received serial: error=%s, Text '%s'\n", cmd, ((res < 0) ? "Yes" : "No"), rcvbuf);
+  fflush(stdout);
 }
 
 /* Return the network state, as returned in AT+COPS.
@@ -193,13 +206,13 @@ int sendatcmd(uint8_t * cmd, float timeout)
  * -2 if AT+COPS could not be read. -1 if not connected. */
 int readnetworkstate(void)
 {
-  uint8_t rcvbuf[300];
-  printf("...readnetworkstate: sending AT+COPS?\n");
+  uint8_t rcvbuf[200];
+  //printf("...readnetworkstate: sending AT+COPS?\n"); fflush(stdout);
   sprintf(rcvbuf, "%s\r\n", "AT+COPS?");
   sendserialline(rcvbuf);
-  int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), 0.5);
+  int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), 1.0);
   if (res <= 0) { return -2; }
-  printf("...readnetworkstate: read %s\n", rcvbuf);
+  printf("...readnetworkstate: read %s\n", rcvbuf); fflush(stdout);
   char * sp1; char * sp2;
   char * st1 = strtok_r(rcvbuf, "\n", &sp1);
   do {
@@ -230,7 +243,7 @@ void mn_waitfornetworkconn(float timeout)
   absolute_time_t toend = make_timeout_time_ms(timeout * 1000.0);
   do {
     nws = readnetworkstate();
-    printf("network state: %d\n", nws);
+    printf("network state: %d\n", nws); fflush(stdout);
     if (nws <= 0) {
       sleep_ms(500);
     } else {
@@ -238,7 +251,7 @@ void mn_waitfornetworkconn(float timeout)
       if (nws == 3) { /* GPRS */
         /* GPRS requires manual context activation, LTE does it automatically */
         printf("GPRS connection detected, sending AT+CGACT=1,1...\n");
-        sendatcmd("AT+CGACT=1,1", 30.0);
+        sendatcmd("AT+CGACT=1,1", timeout * 1000.0);
       }
       return;
     }
@@ -247,17 +260,19 @@ void mn_waitfornetworkconn(float timeout)
 
 void mn_resolvedns(uint8_t * hostname, uint8_t * obuf, int obufsize, float timeout)
 {
-  uint8_t buf[500];
+  uint8_t buf[250];
   sprintf(buf, "AT+UDNSRN=0,\"%s\"\r\n", hostname);
   sendserialline(buf);
   int res = waitforatreplywto(buf, sizeof(buf), timeout);
   if (res <= 0) { /* No success or failure within timeout */
+    printf("Timeout waiting for DNS reply\r\n", buf);
     strcpy(obuf, "");
     return;
   }
   char * sp1;
   char * st1 = strtok_r(buf, "\n", &sp1);
   do {
+    printf("DNSrb: '%s'\r\n", st1); fflush(stdout);
     if (strncmp(st1, "+UDNSRN: \"", 10) == 0) {
       /* This is the line containing the answer */
       int bufpos = 10;
@@ -267,9 +282,11 @@ void mn_resolvedns(uint8_t * hostname, uint8_t * obuf, int obufsize, float timeo
         }
         /* Copy one char and advance to next */
         *obuf = st1[bufpos];
+        obuf++;
         obufsize--;
         bufpos++;
       }
+      printf("\r\n");
       *obuf = 0;
       return;
     }
@@ -297,12 +314,15 @@ void mn_closesocket(int socketnr)
  * only create 7 sockets at a time), or <0 on error. */
 int mn_opentcpconn(uint8_t * hostname, uint16_t port, float timeout)
 {
-  uint8_t buf[500];
+  uint8_t buf[250];
   uint8_t ipasstring[42];
   int socket = -1;
   mn_resolvedns(hostname, ipasstring, sizeof(ipasstring), timeout);
-  if (strlen(ipasstring) < 4) { /* DNS resolution failed */
-    return -1;
+  if (strlen(ipasstring) < 4) { /* DNS resolution failed. Try again. */
+    mn_resolvedns(hostname, ipasstring, sizeof(ipasstring), timeout);
+    if (strlen(ipasstring) < 4) { /* DNS resolution failed */
+      return -1;
+    }
   }
   sendserialline("AT+USOCR=6\r\n"); /* Get a TCP socket with random local port */
   int res = waitforatreplywto(buf, sizeof(buf), timeout);
@@ -483,7 +503,7 @@ void waitforltemoduleready(void)
    * to come up. */
   int res;
   do {
-    res = readseriallinewto(buf, sizeof(buf), 7.5);
+    res = readseriallinewto(buf, sizeof(buf), 7.9);
     if (res >= 19) {
       if (strncmp(buf, "LTEmodule now ready", 19) == 0) {
         printf("LTEmodule reported ready.\r\n");
@@ -499,7 +519,8 @@ int main(void)
     // Unfortunately, the WDT has a timeout of at most 8.3 seconds.
     //watchdog_enable(121000, true);
 
-    stdio_init_all();
+    //stdio_init_all();
+    stdio_uart_init_full (uart0, 230400 /*57600*/, 16, /*17*/ -1);
     sleep_ms(2000); /* This is really just here to allow the serial console to connect */
     printf("MobileWS starting!\r\n");
 
@@ -587,16 +608,16 @@ int main(void)
     // we would want to enable IPv4+IPv6, but we can't -
     // see comment above AT+CGDCONT. So we enable IPv4 only.
     sendatcmd("AT+UPSD=0,0,0", 10.0);
-    // dynamic IP
-    sendatcmd("AT+UPSD=0,7,\"0.0.0.0\"", 10.0);
+    // dynamic IP. Cannot be set on R412M and defaults to this anyways.
+    //sendatcmd("AT+UPSD=0,7,\"0.0.0.0\"", 10.0);
     // servicedomain: CS (voice), PS (data) or both. Should already
     // default to PS due to our european MNOPROFILE.
-    sendatcmd("AT+USVCDOMAIN=1", 10.0);
+    sendatcmd("AT+USVCDOMAIN=2", 10.0);
     // Not sure if the following two are really needed, the ublox
     // documentation raises more questiosn than it answers, but
     // it probably does not hurt.
-    sendatcmd("AT+USIMSTAT=4", 4.0);
-    sendatcmd("AT+UCUSATA=4", 4.0);
+    //sendatcmd("AT+USIMSTAT=4", 4.0);
+    //sendatcmd("AT+UCUSATA=4", 4.0);
     // reboot again to make that take effect
     sendatcmd("AT+CFUN=15", 4.0);
 #endif /* one-off LTE module setup */
@@ -615,29 +636,38 @@ int main(void)
     sendatcmd("AT+UDCONF=1,1", 4.0);
     // Show a bunch of info about the mobile network module
     sendatcmd("ATI", 4.0);
+    // select active profile
+    sendatcmd("AT+UPSD=0,100,1", 60.0);
     /* wait for network connection (but with timeout).
      * We don't really care if this succeeds or not, we'll just try to send
      * data anyways. */
-    mn_waitfornetworkconn(60.0);
-    // select active profile
-    sendatcmd("AT+UPSD=0,100,1", 15.0);
-    // Query status info
+    mn_waitfornetworkconn(181.0);
+    // Query status info - this is only for debugging really.
     sendatcmd("AT+CGACT?", 4.0);
+    sendatcmd("AT+CGDCONT?", 4.0);
+    sleep_ms(1000);
     // Lets open a network connection
-    int sock = mn_opentcpconn("wetter.poempelfox.de", 80, 30.0);
+    int sock = mn_opentcpconn("wetter.poempelfox.de", 80, 61.0);
     if (sock >= 0) {
       char tst[500]; int br;
-      strcpy(tst, "GET /getlastvalue/11 HTTP/1.1\r\nHost: wetter.poempelfox.de\r\nConnection: close");
+      strcpy(tst, "GET /api/getlastvalue/11 HTTP/1.1\r\nHost: wetter.poempelfox.de\r\nConnection: close");
       mn_writesock(sock, tst, strlen(tst), 30.0);
       while ((br = (mn_readsock, tst, sizeof(tst) - 1, 30.0)) > 0) {
         tst[br] = 0;
         printf("Received HTTP reply: %s\r\n", tst);
       }
+    } else {
+      printf("Connection to web server failed :( retcode %d\r\n", sock);
     }
 
     /* Main loop */
     do {
       printf("Loopy MC Loop...\r\n");
+      while (getlinesavailable() > 0) {
+        char buf[400];
+        getserialline(buf, sizeof(buf));
+        printf("rcvd: '%s'\r\n", buf);
+      }
       sleep_ms(10000);
     } while (1);
     printf("Exited main loop.\r\n");
