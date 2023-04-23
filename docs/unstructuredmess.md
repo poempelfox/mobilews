@@ -7,7 +7,8 @@ randomly switch between german and english, sorry about that.
 
 ## hardware so far
 
-* We will probably use a Waveshare RP2040 zero as the microcontroller.
+* We will use an "Olimex ESP32-S2-DevKit-Lipo" as the microcontroller.
+  - We don't plan on connecting a a LiPo-battery though.
 * LTE-modem will be a [MikroE LTE IoT 6 Click](https://www.mikroe.com/lte-iot-6-click)
   - this is based on an u-blox SARA R412M, which supports LTE-M and NB-IoT, but can also fall back to EPGRS where that is not available.
   - we will use an [ResIOT SIM](https://sim.resiot.io/), that permits us to use pretty much any mobile network in Europe. In Germany, we can log into all 3 mobile networks with that - so we should be able to get reception even in the middle of nowhere where the CCCamp is.
