@@ -18,6 +18,15 @@
 #define LTEMRXQUEUESIZE 1500
 #define LTEMTXQUEUESIZE 0  /* 0 means block until everything is written. */
 
+/* If RUNONETIMEMODEMCONFIG is 1, we will send the config commands
+ * for the things that the LTE modem module stores in its non-volatile
+ * memory, like e.g. the APN name, to the modem on bootup.
+ * This obviously needs to be done only once for a new LTE modem module.
+ * Do NOT keep this enabled. */
+#ifndef RUNONETIMEMODEMCONFIG
+#define RUNONETIMEMODEMCONFIG 0
+#endif
+
 static const char *TAG = "mobilenet";
 #define sleep_ms(x) vTaskDelay(pdMS_TO_TICKS(x))
 
@@ -165,7 +174,7 @@ int sendatcmd(char * cmd, int timeout)
   sprintf(rcvbuf, "%s\r\n", cmd);
   sendserialline(rcvbuf);
   int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), timeout);
-  ESP_LOGI(TAG, "sendatcmd: Sent '%s', Received serial: error=%s, Text '%s'\n", cmd, ((res < 0) ? "Yes" : "No"), rcvbuf);
+  ESP_LOGI(TAG, "sendatcmd: Sent '%s', Received serial: error=%s, Text '%s'", cmd, ((res < 0) ? "Yes" : "No"), rcvbuf);
   return res;
 }
 
@@ -182,18 +191,32 @@ void mn_wakeltemodule(void)
   gpio_set_level(LTEMPOWERPIN, 0);
 }
 
-/* Waits for the LTE module ready message on the serial port. */
+/* Waits for a sign that the LTE module is ready.
+ * There are two signs that we accept: Either the module sends its configured
+ * powerup-message, or it sends an "OK", which we consider to be a reply to the
+ * 'AT' command we try to send on entering this function (if the hardware FIFO
+ * has space for it, if it hasn't, then output has probably been blocked for a
+ * long time already and everything is broken anyways). */
 void mn_waitforltemoduleready(void)
 {
   char buf[250];
   int res;
+  if (uart_tx_chars(LTEMUART, "AT\r\n", 4) != 4) {
+    ESP_LOGI(TAG, "waitforltemoduleready: not enough TX buffer space for AT command.");
+  }
   do {
-    /* Timeout is 7 because specification says it may need at most 5 seconds
-     * to come up. */
-    res = readseriallinewto(buf, sizeof(buf), 7);
+    /* Timeout is 6 because specification says it may need at most 5 seconds
+     * to power up after waking it via power pin aka mn_wakeltemodule(). */
+    res = readseriallinewto(buf, sizeof(buf), 6);
     if (res >= 19) {
       if (strncmp(buf, "LTEmodule now ready", 19) == 0) {
         ESP_LOGI(TAG, "LTEmodule reported ready.");
+        return;
+      }
+    }
+    if (res == 2) {
+      if (strncmp(buf, "OK", 2) == 0) {
+        ESP_LOGI(TAG, "LTEmodule did not report ready but returned 'OK'");
         return;
       }
     }
@@ -457,7 +480,7 @@ int mn_readsock(int socket, char * buf, int bufsize, int timeout)
     char rdstr[400];
     if (btr > 128) { btr=128; /* Read at most 128 bytes at once. */ }
     sprintf(rdstr, "AT+USORD=%d,%d\r\n", socket, btr);
-    ESP_LOGI(TAG, "mn_readsock: Sending: %s", rdstr);
+    //ESP_LOGI(TAG, "mn_readsock: Sending: %s", rdstr);
     sendserialline(rdstr);
     int rc = waitforatreplywto(rdstr, sizeof(rdstr), timeout);
     if (rc <= 0) break;
@@ -534,3 +557,81 @@ void mn_init(void)
   ESP_ERROR_CHECK(gpio_config(&ltempowerpingpioconf));
 }
 
+void mn_configureltemodule(void)
+{
+#if (RUNONETIMEMODEMCONFIG == 1) /* one-off LTE module setup */
+  /* These are settings that are saved in the NVRAM of the module, so
+   * there is no need to execute these every time, just once on first
+   * time setup. */
+  /* According to u-blox docs, the module takes up to 5 seconds to power up. */
+  sleep_ms(5000); /* NOTE: we cannot waitforltemoduleready here, because the
+                   * configuration AT+CSGT may not have been executed yet. */
+  sendatcmd("AT", 4);
+  // Set greeting text - this is emitted whenever the module powers on,
+  // so that we can know when it has finished powering on.
+  sendatcmd("AT+CSGT=1,\"LTEmodule now ready\"", 4);
+  // Configure IPv6 address format: :, not .
+  sendatcmd("AT+CGPIAF=1,1,1,0", 4);
+  // disconnect from network, needed for the following
+  sendatcmd("AT+CFUN=0", 10);
+  // set MNO-profile to generic europe (100)
+  sendatcmd("AT+UMNOPROF=100", 4);
+  // reboot to make that take effect
+  sendatcmd("AT+CFUN=15", 4);
+  waitforltemoduleready();
+  sendatcmd("AT", 4);
+  // disconnect from network, needed for the following
+  sendatcmd("AT+CFUN=0", 10);
+  /* configure context (we only use one, nr. 1, the module could handle up to 8)
+   * So obviously, it's tempting to say "IPV4V6" here, and expect the R412M
+   * to do something sane: Try to use IPv6, or IPv4, whatever is available
+   * from the network, we really don't care. However, that is not what the
+   * module does in this mode. What "IPV4V6" seems to mean for u-blox is
+   * "Try to use both IPv4 and IPv6, and break completely unless BOTH are
+   * available, throwing nonsense-error-messages on every command
+   * attempting to use the network". Great work, u-blox, great work.
+   * So it's 2023 and we have to resort to IPv4 only because we
+   * simply cannot guarantee to always have IPv6 available in every
+   * network. */
+  sendatcmd("AT+CGDCONT=1,\"IP\",\"resiot.m2m\"", 10);
+  // reboot again to make that take effect
+  sendatcmd("AT+CFUN=15", 4);
+  waitforltemoduleready();
+  sendatcmd("AT", 4);
+  // disconnect from network, needed for the following
+  sendatcmd("AT+CFUN=0", 10);
+  // we would want to enable IPv4+IPv6, but we can't -
+  // see comment above AT+CGDCONT. So we enable IPv4 only.
+  sendatcmd("AT+UPSD=0,0,0", 10);
+  // dynamic IP. Cannot be set on R412M and defaults to this anyways.
+  //sendatcmd("AT+UPSD=0,7,\"0.0.0.0\"", 10);
+  // servicedomain: CS (voice), PS (data) or both. Should already
+  // default to PS due to our european MNOPROFILE.
+  sendatcmd("AT+USVCDOMAIN=2", 10);
+  // Not sure if the following two are really needed, the ublox
+  // documentation raises more questiosn than it answers, but
+  // it probably does not hurt.
+  //sendatcmd("AT+USIMSTAT=4", 4);
+  //sendatcmd("AT+UCUSATA=4", 4);
+  // reboot again to make that take effect
+  sendatcmd("AT+CFUN=15", 4);
+#endif /* (RUNONETIMEMODEMCONFIG == 1) - one-off LTE module setup */
+  /* Wait until the LTE module signals that it is ready. */
+  mn_waitforltemoduleready();
+  // Possibly useful for later: The module has a RTC - command AT+CCLK
+  // Just send an "AT", so the module can see and set the correct baudrate.
+  sendatcmd("AT", 4);
+  // Do not echo back commands.
+  sendatcmd("ATE0", 4);
+  // Tell the module to send "verbose" error messages, even though
+  // they really aren't what anybody in his right mind would call
+  // verbose...
+  sendatcmd("AT+CMEE=2", 4);
+  // Set in- and output of socket functions to hex-encoded, so we don't need
+  // to deal with escaping special characters.
+  sendatcmd("AT+UDCONF=1,1", 4);
+  // Show a bunch of info about the mobile network module
+  sendatcmd("ATI", 4);
+  // select active profile
+  sendatcmd("AT+UPSD=0,100,1", 60);
+}

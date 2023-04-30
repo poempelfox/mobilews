@@ -3,10 +3,18 @@
 #define _MOBILENET_H_
 
 
-/* This wakes the LTE module (by pulling its "power" pin for a short while) */
+/* This wakes the LTE module (by pulling its "power" pin for a short while).
+ * Note that this is a complete NOOP if the module already is awake. It
+ * does not even reset the timeout-before-it-goes-to-sleep. And there is
+ * no way to reset the module beforehand to ensure it's not awake already. */
 void mn_wakeltemodule(void);
 
-/* Waits for the LTE module ready message on the serial port. */
+/* Waits for a sign that the LTE module is ready.
+ * There are two signs that we accept: Either the module sends its configured
+ * powerup-message, or it sends an "OK", which we consider to be a reply to the
+ * 'AT' command we try to send on entering this function (if the hardware FIFO
+ * has space for it, if it hasn't, then output has probably been blocked for a
+ * long time already and everything is broken anyways). */
 void mn_waitforltemoduleready(void);
 
 /* Tries to wait until the mobile network has a data connection, with a timeout.
@@ -58,13 +66,19 @@ int mn_readsock(int socket, char * buf, int bufsize, int timeout);
  */
 void mn_init(void);
 
+/* This sends setup/configuration commands to the LTE module,
+ * including one-time setup if that is enabled during compilation. */
+void mn_configureltemodule(void);
+
 /* sends an AT command to the LTE module, and waits for it to return a reply,
  * whether it be an OK or an ERROR. With timeout.
  * Returns <0 if there is an error, but note that error does not mean the
  * string "ERROR" was returned, it means there was no or no valid reply.
  * This function is obviously NOT useful if you care about the reply at
  * all, because you won't see it. It's mostly useful for firing off
- * initialization sequences. This probably should not be exported at all. */
+ * initialization sequences.
+ * This probably should not be exported at all, and will probably be
+ * removed at some point. */
 int sendatcmd(char * cmd, int timeout);
 
 #endif /* _MOBILENET_H_ */
