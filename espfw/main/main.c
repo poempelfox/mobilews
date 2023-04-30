@@ -6,6 +6,7 @@
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "i2c.h"
+#include "lps35hw.h"
 #include "mobilenet.h"
 #include "sht4x.h"
 
@@ -19,6 +20,7 @@ void app_main(void)
   mn_init();
   i2c_port_init();
   sht4x_init(I2C_NUM_0);
+  lps35hw_init(I2C_NUM_0);
   ESP_LOGI(TAG, "Early initialization finished, waking LTE module...");
   mn_wakeltemodule();
   /* Send setup commands to the IoT 6 click (uBlox Sara-R412M) module */
@@ -48,6 +50,7 @@ void app_main(void)
   } */
   
   sht4x_startmeas();
+  lps35hw_startmeas();
   int i = 0;
   while (1) {
 /*    char serialbuf[200];
@@ -60,8 +63,10 @@ void app_main(void)
     struct sht4xdata temphum;
     sht4x_read(&temphum);
     sht4x_startmeas(); // Run the next measurement.
+    double press = lps35hw_readpressure();
+    lps35hw_startmeas(); // Run the next measurement.
     if (temphum.valid) {
-      printf(" [%d] temp %.2f   hum %.1f\n", i, temphum.temp, temphum.hum);
+      printf(" [%d] temp %.2f   hum %.1f   press = %.3lfhPa\n", i, temphum.temp, temphum.hum, press);
     } else {
       printf(" [%d] no valid temp/hum\n", i);
     }
