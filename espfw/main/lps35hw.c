@@ -5,7 +5,7 @@
 #include "sdkconfig.h"
 
 
-#define LPS35HWADDR 0x5d  /* That is hardwired */
+#define LPS35HWADDR 0x5d  /* That is the default address of our breakout board */
 #define I2C_MASTER_TIMEOUT_MS 1000  /* Timeout for I2C communication */
 
 static i2c_port_t lps35hwi2cport;
@@ -51,12 +51,10 @@ void lps35hw_startmeas(void)
 double lps35hw_readpressure(void)
 {
     uint8_t prr[3];
-    int lpshadreaderr = 0;
     if (lps35hw_register_read(0x80 | 0x28, &prr[0], 3) != ESP_OK) {
       /* There was an I2C read error - return a negative pressure to signal that. */
       return -999999.9;
     }
-    ESP_LOGI("lps35hw.c", "LPS35HW read - err %d values %02x%02x%02x", lpshadreaderr, prr[0], prr[1], prr[2]);
     double press = (((uint32_t)prr[2]  << 16)
                   + ((uint32_t)prr[1]  <<  8)
                   + ((uint32_t)prr[0]  <<  0)) / 4096.0;
