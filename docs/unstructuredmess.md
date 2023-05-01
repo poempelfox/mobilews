@@ -12,6 +12,16 @@ randomly switch between german and english, sorry about that.
 * LTE-modem will be a [MikroE LTE IoT 6 Click](https://www.mikroe.com/lte-iot-6-click)
   - this is based on an u-blox SARA R412M, which supports LTE-M and NB-IoT, but can also fall back to EPGRS where that is not available.
   - we will use an [ResIOT SIM](https://sim.resiot.io/), that permits us to use pretty much any mobile network in Europe. In Germany, we can log into all 3 mobile networks with that - so we should be able to get reception even in the middle of nowhere where the CCCamp is.
+* SHT41 temperature/humidity sensor
+  - SHT45-AD1F, the variant of SHT45 with builtin protective membrane, which makes these variants practically indestructable, should be available from May 30 2023, but it'll then take some more time before breakout-boards using these become available.
+  - for now we'll use one of the unprotected SHT41 BOBs we still have, and possibly exchange them later - they are 100% software compatible anyways.
+* LPS35HW pressure sensor
+  - in the form of an Adafruit breakout board from which we had to desolder the useless and power-wasting always-on LED they insist on putting on.
+* LTR390 ambient light / UV sensor
+  - in the form of an Adafruit breakout board, on which it seems they at least had the decency to provide an undocumented 'switch' for the useless and power-wasting always-on LED: In revision B, there are two solder pads on the back with a tiny and easily cuttable wire between, labelled "LED". As of April 2023, their documentation page does not mention a revision B or the switch. And I still cannot stop shaking my head about how dumb it is to put an ALWAYS ON LED on a LIGHT SENSOR.
+* SEN50 particulate matter sensor
+* some not-yet-decided wind speed (aenometer) / wind direction sensor
+* possibly an optical RG15 rain sensor?
 * Gehaeuse aus Holz.
   - Seiten: [Lamellentueren 39,5 x 39,4 cm](https://www.ben-camilla.com/index.php?a=3272)
   - Konstruktion Fuesse noch unklar - sollten abschraubbar sein, damit mans gut transportiert kriegt. Stichwort: Aufschraubmuttern.
@@ -22,4 +32,18 @@ randomly switch between german and english, sorry about that.
     + outer dimensions: 406 x 340 mm
     + has 4 holes for mounting at the bottom of the frame, 9 mm x 6mm (rounded), so it will be very easy to screw this onto the wodden roof.
   - alter Bleiakku (AGM) - ist vielleicht nicht mehr gut genug und wir brauchen nen neuen. Andererseits muss er nur ein paar Tage halten und kriegt voraussichtlich ja fast taeglich Sonne.
+
+## wiring ##
+
+* we will use two I2C busses: One for the 3.3V sensors, and one for the 5V powered sensor - just to reduce the risk of accidential 5V to the other sensors. Note that the sensor requiring 5V still has 3.3V logic level for the I2C.
+  - For consistency, we will always use green cabling for SCL and yellow cabling for SDA
+  - Bus 0 (3.3V): GPIO9 == SCL, GPIO10 - SDA
+  - Bus 1 (5V powered device with 3.3V I2C level): GPIO11 = SCL, GPIO12 = SDA
+* LTE module
+  - the power wires (GND, 5V, 3.3V) should be routed through our distribution board.
+  - ESP32 GPIO1 <-> LTE-module RX
+  - ESP32 GPIO2 <-> LTE-module TX
+  - ESP32 GPIO3 <-> LTE-module RTS
+  - ESP32 GPIO4 <-> LTE-module CTS
+  - ESP32 GPIO5 <-> LTE-module PWR
 
