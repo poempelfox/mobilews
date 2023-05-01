@@ -27,7 +27,10 @@ int submit_to_wpd_multi(int arraysize, struct wpd * aowpd)
       strcat(tmpstr, "Host: wetter.poempelfox.de\r\n");
       strcat(tmpstr, "Connection: close\r\n");
       strcat(tmpstr, "Content-type: application/json\r\n");
-      mn_writesock(sock, tmpstr, strlen(tmpstr), 61);
+      res = mn_writesock(sock, tmpstr, strlen(tmpstr), 61);
+      if (res != 0) {
+        return res;
+      }
       /* Build the contents of the HTTP POST we will
        * send to wetter.poempelfox.de */
       strcpy(tmpstr, "{\"software_version\":\"mws0.1\",\"sensordatavalues\":[");
@@ -43,8 +46,14 @@ int submit_to_wpd_multi(int arraysize, struct wpd * aowpd)
       char tmps2[150];
       sprintf(tmps2, "X-Sensor: %s\r\nContent-length: %d\r\n\r\n",
               WPDTOKEN, strlen(tmpstr));
-      mn_writesock(sock, tmps2, strlen(tmps2), 61);
-      mn_writesock(sock, tmpstr, strlen(tmpstr), 61);
+      res = mn_writesock(sock, tmps2, strlen(tmps2), 61);
+      if (res != 0) {
+        return res;
+      }
+      res = mn_writesock(sock, tmpstr, strlen(tmpstr), 61);
+      if (res != 0) {
+        return res;
+      }
       vTaskDelay(pdMS_TO_TICKS(3000)); // FIXME - instead wait for reply.
       int br;
       while ((br = mn_readsock(sock, tmpstr, sizeof(tmpstr) - 1, 30)) > 0) {
@@ -52,8 +61,8 @@ int submit_to_wpd_multi(int arraysize, struct wpd * aowpd)
         ESP_LOGI(TAG, "Received HTTP reply: %s", tmpstr);
       }
       mn_closesocket(sock);
-      /* FIXME set value depending on the reply. */
-      return 0;
+      /* FIXME set res depending on the reply. */
+      res = 0;
     }
     return res;
 }

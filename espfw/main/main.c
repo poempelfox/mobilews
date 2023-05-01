@@ -51,10 +51,9 @@ void app_main(void)
     ESP_LOGE(TAG, "Connection to web server failed :( retcode %d", sock);
   } */
   
-  time_t lastmeasts = 0;
+  time_t lastmeasts = time(NULL);
   while (1) {
-    if (((time(NULL) - lastmeasts) >= 60)
-      || (lastmeasts == 0)) { /* time() starts at 0 on startup, so we need this special case. */
+    if ((time(NULL) - lastmeasts) >= 60) {
       /* Time for an update of all sensors. */
       lastmeasts = time(NULL);
       sht4x_startmeas();
@@ -70,6 +69,8 @@ void app_main(void)
       }
       /* Now send them out via network */
       mn_wakeltemodule();
+      mn_waitforltemoduleready();
+      mn_repeatcfgcmds();
       mn_waitfornetworkconn(181);
       mn_waitforipaddr(61);
       if (temphum.valid) {

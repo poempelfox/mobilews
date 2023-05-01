@@ -51,9 +51,9 @@ void mn_closesocket(int socketnr);
 int mn_opentcpconn(char * hostname, uint16_t port, int timeout);
 
 /* Attempts to write data to a network socket.
- * Errors are just silently ignored.
+ * Returns 0 on success.
  */
-void mn_writesock(int socket, char * buf, int bufsize, int timeout);
+int mn_writesock(int socket, char * buf, int bufsize, int timeout);
 
 /* Attempts to read data from a network socket.
  * Note that this is nonblocking, it will not wait for data to become available.
@@ -69,6 +69,10 @@ void mn_init(void);
 /* This sends setup/configuration commands to the LTE module,
  * including one-time setup if that is enabled during compilation. */
 void mn_configureltemodule(void);
+
+/* This repeats the config commands that you seem to need to
+ * repeat everytime the module wakes up from sleep. */
+void mn_repeatcfgcmds(void);
 
 /* sends an AT command to the LTE module, and waits for it to return a reply,
  * whether it be an OK or an ERROR. With timeout.

@@ -49,6 +49,25 @@ static void delchar(char * a, char b) {
   *d = '\0';
 }
 
+/* Helper function to clear anything still unread on the serial input before
+ * sending a new command. */
+static void clearserialinputbuf(void)
+{
+  /* Clear our buffered input. */
+  serialinlbpos = 0;
+  serialinlblav = 0;
+  /* Clear UART buffer */
+  size_t sba;
+  if (uart_get_buffered_data_len(LTEMUART, &sba) != ESP_OK) {
+    return;
+  }
+  while (sba > 0) {
+    char b[2];
+    (void) uart_read_bytes(LTEMUART, b, 1, 1);
+    sba--;
+  }
+}
+
 static void readavailableserialuntillinefeed(void)
 {
   if (serialinlblav > 0) { /* Don't read anything if the previous line has */
@@ -145,7 +164,7 @@ int waitforatreplywto(char * buf, int buflen, int timeout)
        || (strncmp(cptr, "+CME ERROR", 10) == 0)) {
         return res;
       }
-      buf[res] = '\n';
+      buf[res] = '\n'; // At this point we're overwriting the terminating \0 with a \n.
       res++;
       cptr = &buf[res];
     }
@@ -171,6 +190,7 @@ void sendserialline(char * line)
 int sendatcmd(char * cmd, int timeout)
 {
   char rcvbuf[350];
+  clearserialinputbuf();
   sprintf(rcvbuf, "%s\r\n", cmd);
   sendserialline(rcvbuf);
   int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), timeout);
@@ -201,6 +221,8 @@ void mn_waitforltemoduleready(void)
 {
   char buf[250];
   int res;
+  /* Clear input buffer before we start */
+  clearserialinputbuf();
   if (uart_tx_chars(LTEMUART, "AT\r\n", 4) != 4) {
     ESP_LOGI(TAG, "waitforltemoduleready: not enough TX buffer space for AT command.");
   }
@@ -230,6 +252,7 @@ void mn_waitforltemoduleready(void)
 int readnetworkstate(void)
 {
   char rcvbuf[200];
+  clearserialinputbuf();
   sprintf(rcvbuf, "%s\r\n", "AT+COPS?");
   sendserialline(rcvbuf);
   int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), 2);
@@ -287,6 +310,7 @@ void mn_waitforipaddr(int timeout)
   char * obuf = &ipbuf[0];
   int obufsize = sizeof(ipbuf);
   time_t stts = time(NULL);
+  clearserialinputbuf();
   do {
     sprintf(buf, "AT+CGPADDR=1\r\n");
     sendserialline(buf);
@@ -327,21 +351,25 @@ void mn_waitforipaddr(int timeout)
   } while ((time(NULL) - stts) < timeout);
 }
 
+/* Known problems:
+ * Sometimes the LTE module seems to just reply "OK" - without returning the
+ * +UDNSRN-reply. In this case, just retry. */
 void mn_resolvedns(char * hostname, char * obuf, int obufsize, int timeout)
 {
-  char buf[250];
+  char buf[250]; char * opp = obuf;
+  clearserialinputbuf();
   sprintf(buf, "AT+UDNSRN=0,\"%s\"\r\n", hostname);
   sendserialline(buf);
   int res = waitforatreplywto(buf, sizeof(buf), timeout);
   if (res <= 0) { /* No success or failure within timeout */
-    ESP_LOGE(TAG, "Timeout waiting for DNS reply");
+    ESP_LOGE(TAG, "mn_resolvedns: Timeout waiting for DNS reply");
     strcpy(obuf, "");
     return;
   }
   char * sp1;
   char * st1 = strtok_r(buf, "\n", &sp1);
   do {
-    ESP_LOGI(TAG, "DNSrb: '%s'", st1);
+    //ESP_LOGI(TAG, "DNSrb: '%s'", st1);
     if (strncmp(st1, "+UDNSRN: \"", 10) == 0) {
       /* This is the line containing the answer */
       int bufpos = 10;
@@ -350,17 +378,19 @@ void mn_resolvedns(char * hostname, char * obuf, int obufsize, int timeout)
           break;
         }
         /* Copy one char and advance to next */
-        *obuf = st1[bufpos];
-        obuf++;
+        *opp = st1[bufpos];
+        opp++;
         obufsize--;
         bufpos++;
       }
-      *obuf = 0;
+      *opp = 0;
+      ESP_LOGI(TAG, "Resolved '%s' to '%s'", hostname, obuf);
       return;
     }
     st1 = strtok_r(NULL, "\n", &sp1);
   } while (st1 != NULL);
   /* No DNS reply found in output. Return empty string to signal the error. */
+  ESP_LOGE(TAG, "mn_resolvedns: No DNS reply received.");
   strcpy(obuf, "");
 }
 
@@ -373,8 +403,8 @@ void mn_resolvedns(char * hostname, char * obuf, int obufsize, int timeout)
 void mn_closesocket(int socketnr)
 {
   char buf[80];
-  sprintf(buf, "AT+USOCL=%d,1\r\n", socketnr);
-  sendserialline(buf);
+  sprintf(buf, "AT+USOCL=%d,1", socketnr);
+  sendatcmd(buf, 61);
 }
 
 /* Opens a TCP connection to hostname on port.
@@ -433,12 +463,12 @@ int mn_opentcpconn(char * hostname, uint16_t port, int timeout)
 }
 
 /* Attempts to write data to a network socket.
- * Errors are just silently ignored.
+ * Returns 0 on success.
  */
-void mn_writesock(int socket, char * buf, int bufsize, int timeout)
+int mn_writesock(int socket, char * buf, int bufsize, int timeout)
 {
-  if (socket < 0) { return; }
-  if (bufsize <= 0) { return; }
+  if (socket < 0) { return -1; }
+  if (bufsize <= 0) { return -2; }
   while (bufsize > 0) {
     int bts = bufsize;
     char wrstr[400];
@@ -462,10 +492,33 @@ void mn_writesock(int socket, char * buf, int bufsize, int timeout)
       strcat(wrstr, (char *)prch);
       buf++; /* Advance to next position in buffer */
     }
-    strcat(wrstr, "\"");
-    sendatcmd(wrstr, timeout);
+    strcat(wrstr, "\"\r\n");
+    sendserialline(wrstr);
     bufsize -= bts; /* Update size of remaining buffer */
+    int res = waitforatreplywto(&wrstr[0], sizeof(wrstr), timeout);
+    if (res <= 0) {
+      ESP_LOGE(TAG, "mn_writesock: aborting because we received no reply from the modem before timeout.");
+      return -3;
+    } else {
+      wrstr[res] = 0;
+      char * sp1;
+      char * st1 = strtok_r(wrstr, "\n", &sp1);
+      int hadok = 0;
+      do {
+        if (strncmp(st1, "OK", 2) == 0) { // We got an "OK"
+          hadok = 1;
+          /* Do not 'break;', we need to output the original string later, and
+           * that requires iterating through strtok until the end. */
+        }
+        st1 = strtok_r(NULL, "\n", &sp1);
+      } while (st1 != NULL);
+      if (hadok != 1) {
+        ESP_LOGE(TAG, "mn_writesock: aborting because we received no 'OK' reply from the modem: '%s'.", wrstr);
+        return -4;
+      }
+    }
   }
+  return 0;
 }
 
 /* Attempts to read data from a network socket.
@@ -633,5 +686,17 @@ void mn_configureltemodule(void)
   // Show a bunch of info about the mobile network module
   sendatcmd("ATI", 4);
   // select active profile
-  sendatcmd("AT+UPSD=0,100,1", 60);
+  sendatcmd("AT+UPSD=0,100,1", 61);
+}
+
+void mn_repeatcfgcmds(void)
+{
+  // Do not echo back commands.
+  sendatcmd("ATE0", 4);
+  // "verbose" error messages
+  sendatcmd("AT+CMEE=2", 4);
+  // Set in- and output of socket functions to hex-encoded
+  sendatcmd("AT+UDCONF=1,1", 4);
+  // select active profile
+  sendatcmd("AT+UPSD=0,100,1", 61);
 }
