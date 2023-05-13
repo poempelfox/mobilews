@@ -20,12 +20,15 @@ randomly switch between german and english, sorry about that.
 * LTR390 ambient light / UV sensor
   - in the form of an Adafruit breakout board, on which it seems they at least had the decency to provide an undocumented 'switch' for the useless and power-wasting always-on LED: In revision B, there are two solder pads on the back with a tiny and easily cuttable wire between, labelled "LED". As of April 2023, their documentation page does not mention a revision B or the switch. And I still cannot stop shaking my head about how dumb it is to put an ALWAYS ON LED on a LIGHT SENSOR.
 * SEN50 particulate matter sensor
-* some not-yet-decided wind speed (aenometer) / wind direction sensor
-* possibly an optical RG15 rain sensor?
-* Gehaeuse aus Holz.
+* DFROBOT SEN0483 wind speed (anemometer) and SEN0482 wind direction sensor - both are connected via RS485 (serial with differential voltage). Both are made of metal and look surprisingly sturdy.
+* probably an optical RG15 rain sensor
+* DFROBOT DFR0627 dual I2C-to-UART-module - because we do not have enough UARTs (the ESP32-S2 only has two in hardware, and one is the system console and the other is the LTE modem), we expand them with this to be able to connect the rain sensor and wind sensors
+* Olimex MOD-RS485 RS485-converter - this converts 'normal 3.3V UART' to 'RS485'.
+* Case made from wood
+  - essentially a stevenson screen / englische Huette
+  - with a solar panel on the roof (also see under "solar")
   - Seiten: [Lamellentueren 39,5 x 39,4 cm](https://www.ben-camilla.com/index.php?a=3272)
   - Konstruktion Fuesse noch unklar - sollten abschraubbar sein, damit mans gut transportiert kriegt. Stichwort: Aufschraubmuttern.
-  - Aufs Dach Solarzelle (siehe unter Solar)
 * Solar zur Stromversorgung
   - [Solarmodul-Solarladegeraet-Set](https://www.amazon.de/-/dp/B07RZBVTGR/) "20W" (wers glaubt wird selig)
   - solar panel
@@ -38,7 +41,12 @@ randomly switch between german and english, sorry about that.
 * we will use two I2C busses: One for the 3.3V sensors, and one for the 5V powered sensor - just to reduce the risk of accidential 5V to the other sensors. Note that the sensor requiring 5V still has 3.3V logic level for the I2C.
   - For consistency, we will always use green cabling for SCL and yellow cabling for SDA
   - Bus 0 (3.3V): GPIO9 == SCL, GPIO10 - SDA
+    + SHT3x - I2C-address: 0x44 1000100b
+    + LTR390 - I2C-address: 0x53 1010011b
+    + LPS35HW - I2C-address: 0x5d 1011101b
+    + DFR0627 - this always responds to 8 I2C-addresses, i.e. only the 4 most significant address bits are really address bits and the rest is abused for function selection, but at least we can set 2 of the 4 via DIP switch. We set both to 1, which results in the device taking up the addresses 1110xxxb, or 0x70 to 0x77 (inclusive)
   - Bus 1 (5V powered device with 3.3V I2C level): GPIO11 = SCL, GPIO12 = SDA
+    + SEN50 particulate matter sensor - I2C-address: ?
 * LTE module
   - the power wires (GND, 5V, 3.3V) should be routed through our distribution board.
   - ESP32 GPIO1 <-> LTE-module RX
