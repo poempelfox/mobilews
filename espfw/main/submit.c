@@ -69,13 +69,13 @@ int submit_to_wpd_multi(int arraysize, struct wpd * aowpd)
 
 int submit_to_wpd(char * sensorid, float value)
 {
-  struct wpd aoosm[1];
+  struct wpd aowpd[1];
   if (strcmp(sensorid, "") == 0) {
-    ESP_LOGI(TAG, "Not sending data to opensensemap because sensorid is not set.");
+    ESP_LOGI(TAG, "Not sending data to wetter.poempelfox.de because sensorid is not set.");
     return 1;
   }
-  aoosm[0].sensorid = sensorid;
-  aoosm[0].value = value;
-  return submit_to_wpd_multi(1, aoosm);
+  aowpd[0].sensorid = sensorid;
+  aowpd[0].value = value;
+  return submit_to_wpd_multi(1, aowpd);
 }
 
