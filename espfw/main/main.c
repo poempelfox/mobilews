@@ -11,6 +11,7 @@
 #include "mobilenet.h"
 #include "sht4x.h"
 #include "submit.h"
+#include "wk2132.h"
 
 static const char *TAG = "mobilews";
 
@@ -23,10 +24,14 @@ void app_main(void)
   i2c_port_init();
   sht4x_init(I2C_NUM_0);
   lps35hw_init(I2C_NUM_0);
+  wk2132_init(I2C_NUM_0);
+  wk2132_serialportinit(0, 9600); /* RG15 runs at 9600 */
+  wk2132_serialportinit(1, 9600); /* Wind sensor also runs at 9600 */
   ESP_LOGI(TAG, "Early initialization finished, waking LTE module...");
   mn_wakeltemodule();
   /* Send setup commands to the IoT 6 click (uBlox Sara-R412M) module */
   mn_configureltemodule();
+#if 0
   /* wait for network connection (but with timeout).
    * We don't really care if this succeeds or not, we'll just try to send
    * data anyways. */
@@ -35,21 +40,7 @@ void app_main(void)
   // Query status info - this is only for debugging really.
   sendatcmd("AT+CGACT?", 4);
   sendatcmd("AT+CGDCONT?", 4);
-  // Lets open a network connection
-/*
-  int sock = mn_opentcpconn("wetter.poempelfox.de", 80, 61);
-  if (sock >= 0) {
-    char tst[500]; int br;
-    strcpy(tst, "GET /api/getlastvalue/11 HTTP/1.1\r\nHost: wetter.poempelfox.de\r\nConnection: close\r\n\r\n");
-    mn_writesock(sock, tst, strlen(tst), 30);
-    sleep_ms(3000); // FIXME
-    while ((br = mn_readsock(sock, tst, sizeof(tst) - 1, 30)) > 0) {
-      tst[br] = 0;
-      ESP_LOGI(TAG, "Received HTTP reply: %s", tst);
-    }
-  } else {
-    ESP_LOGE(TAG, "Connection to web server failed :( retcode %d", sock);
-  } */
+#endif
   
   time_t lastmeasts = time(NULL);
   while (1) {
