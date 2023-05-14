@@ -5,6 +5,7 @@
  * is available in English... Who doesn't love a little challenge? */
 
 #include <esp_log.h>
+#include <time.h>
 #include "wk2132.h"
 #include "sdkconfig.h"
 
@@ -183,12 +184,43 @@ void wk2132_serialportinit(uint8_t sub_uart, long baudrate)
     wk2132_register_write_byte(REG_WK2132_SCR, sub_uart, 0, 0x03);
 }
 
+uint8_t wk2132_get_available_to_read(uint8_t sub_uart)
+{
+  uint8_t bc;
+  if (wk2132_register_read_byte(REG_WK2132_RFCNT, sub_uart, 0, &bc) != ESP_OK) {
+    return 0;
+  }
+  return bc;
+}
+
+uint8_t wk2132_read_serial(uint8_t sub_uart, char * buf, uint8_t len)
+{
+  uint8_t res = 0;
+  uint8_t bc;
+  /* Find out how many bytes are available in the RX FIFO, and read at most that. */
+  wk2132_register_read_byte(REG_WK2132_RFCNT, sub_uart, 0, &bc);
+  if (bc > len) { bc = len; }
+  for (int i = 0; i < bc; i++) {
+    esp_err_t e;
+    e = i2c_master_read_from_device(wk2132i2cport,
+                                    GETI2CAD(WK2132_FIFO, sub_uart),
+                                    (uint8_t *)&buf[i], 1,
+                                    pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    if (e != ESP_OK) {
+      ESP_LOGE("wk2132", "Failed to read from FIFO on sub_uart %02x", sub_uart);
+      break;
+    }
+    res++;
+  }
+  return res;
+}
+
 uint8_t wk2132_write_serial(uint8_t sub_uart, const char * buf, uint8_t len)
 {
   uint8_t res = 0;
   uint8_t bc;
   /* Find out how much space is available in the TX FIFO, and write at most that. */
-  wk2132_register_read_byte(REG_WK2132_FSR, sub_uart, 0, &bc);
+  wk2132_register_read_byte(REG_WK2132_TFCNT, sub_uart, 0, &bc);
   bc = 0xff - bc;
   if (bc > len) { bc = len; }
   for (int i = 0; i < bc; i++) {
@@ -204,4 +236,17 @@ uint8_t wk2132_write_serial(uint8_t sub_uart, const char * buf, uint8_t len)
     res++;
   }
   return res;
+}
+
+void wk2132_flush(uint8_t sub_uart)
+{
+  esp_err_t e;
+  uint8_t d;
+  time_t stati = time(NULL);
+  do {
+    e = wk2132_register_read_byte(REG_WK2132_FSR, sub_uart, 0, &d);
+    if (e != ESP_OK) break;
+    if ((time(NULL) - stati) > 3) break; /* Timeout, abort */
+    /* Bits in FSR-register: Bit 0 - TX Busy, Bit 2 - TX FIFO not empty */
+  } while ((d & 0x05) != 0);
 }
