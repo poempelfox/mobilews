@@ -700,3 +700,11 @@ void mn_repeatcfgcmds(void)
   // select active profile
   sendatcmd("AT+UPSD=0,100,1", 61);
 }
+
+void mn_rebootltemodule(void)
+{
+  /* MT silent reset with detach from network, saving of NVM parameters,
+   * and reset of SIM card. */
+  sendatcmd("AT+CFUN=16", 4);
+}
+

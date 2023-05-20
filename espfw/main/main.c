@@ -43,6 +43,7 @@ void app_main(void)
 #endif
   
   time_t lastmeasts = time(NULL);
+  time_t lastsuccsubmit = time(NULL);
   while (1) {
     if ((time(NULL) - lastmeasts) >= 60) {
       /* Time for an update of all sensors. */
@@ -70,11 +71,23 @@ void app_main(void)
         tosubmit[0].value = temphum.temp;
         tosubmit[1].sensorid = "75";
         tosubmit[1].value = temphum.hum;
-        submit_to_wpd_multi(2, tosubmit);
+        if (submit_to_wpd_multi(2, tosubmit) == 0) {
+          lastsuccsubmit = time(NULL);
+        }
       }
       if (press > 0) {
-        submit_to_wpd("76", press);
+        if (submit_to_wpd("76", press) == 0) {
+          lastsuccsubmit = time(NULL);
+        }
       }
+    }
+    if ((time(NULL) - lastsuccsubmit) > 1800) {
+      /* We have not successfully submitted any values in 30 minutes.
+       * That probably means that our crappy LTE module has once again locked up.
+       * So lets try to tell it to reset, and then reset the ESP. */
+      ESP_LOGE(TAG, "No successful submit in %lld seconds - will now try to reset.", (time(NULL) - lastsuccsubmit));
+      mn_rebootltemodule();
+      esp_restart();
     }
     long howmuchtosleep = (lastmeasts + 60) - time(NULL) - 1;
     if (howmuchtosleep > 60) { howmuchtosleep = 60; }
