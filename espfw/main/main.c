@@ -11,6 +11,7 @@
 #include "mobilenet.h"
 #include "sht4x.h"
 #include "submit.h"
+#include "windsens.h"
 #include "wk2132.h"
 
 static const char *TAG = "mobilews";
@@ -26,7 +27,7 @@ void app_main(void)
   lps35hw_init(I2C_NUM_0);
   wk2132_init(I2C_NUM_0);
   wk2132_serialportinit(0, 9600); /* RG15 runs at 9600 */
-  wk2132_serialportinit(1, 9600); /* Wind sensor also runs at 9600 */
+  windsens_init(1); /* Wind sensor is connected to wk2132 port 1 */
   ESP_LOGI(TAG, "Early initialization finished, waking LTE module...");
   mn_wakeltemodule();
   /* Send setup commands to the IoT 6 click (uBlox Sara-R412M) module */
@@ -53,12 +54,15 @@ void app_main(void)
       sleep_ms(1111); /* Slightly more than a second is enough for all the sensors above */
       struct sht4xdata temphum;
       sht4x_read(&temphum);
-      double press = lps35hw_readpressure();
       if (temphum.valid) {
-        printf(" temp %.2f   hum %.1f   press = %.3lfhPa\n", temphum.temp, temphum.hum, press);
+        ESP_LOGI(TAG, "|- temp %.2f   hum %.1f", temphum.temp, temphum.hum);
       } else {
-        printf(" no valid temp/hum, press = %.3lfhPa\n", press);
+        ESP_LOGI(TAG, "|- no valid temp/hum");
       }
+      double press = lps35hw_readpressure();
+      ESP_LOGI(TAG, "|- press %.3lfhPa", press);
+      float wd = windsens_getwinddir();
+      ESP_LOGI(TAG, "|- wind direction: %.1f degrees\n", wd);
       /* Now send them out via network */
       mn_wakeltemodule();
       mn_waitforltemoduleready();

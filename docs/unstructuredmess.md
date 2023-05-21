@@ -54,4 +54,11 @@ randomly switch between german and english, sorry about that.
   - ESP32 GPIO3 <-> LTE-module RTS
   - ESP32 GPIO4 <-> LTE-module CTS
   - ESP32 GPIO5 <-> LTE-module PWR
+* Olimex MOD-RS485
+  - connected with 4 wires (3V3, GND, TX, RX) to the DFR0627 I2C-to-Serial-adapter Port "2"
+    + I2C-to-Serial P2 "+" (red) <-> MOD-RS485 "VCC" (Pin 1)
+    + I2C-to-Serial P2 "-" (black) <-> MOD-RS485 "GND" (Pin 2)
+    + I2C-to-Serial P2 "T" (blue) <-> MOD-RS485 "TXD" (Pin 3)
+    + I2C-to-Serial P2 "R" (green) <-> MOD-RS485 "RXD" (Pin 4)
+  - MOD-RS485 SCK (Pin 9) and SS# (Pin 10) <-> ESP32 GPIO13 (this is used to switch between "receiving" and "sending" on the half-duplex RS485 bus); we use a splitter cable to connect them both to one I/O pin.
 
