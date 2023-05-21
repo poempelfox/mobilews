@@ -18,5 +18,11 @@ void windsens_init(uint8_t wsp);
  * will run for a while. */
 float windsens_getwinddir(void);
 
+/* Returns the wind speed - in meters per second (m/s).
+ * Returns <0.0 on error.
+ * This communicates with and waits for reply from the sensor, so
+ * will run for a while. */
+float windsens_getwindspeed(void);
+
 #endif /* _WINDSENS_H_ */
 

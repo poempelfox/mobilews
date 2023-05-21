@@ -176,3 +176,47 @@ float windsens_getwinddir(void)
   return -1.0;
 }
 
+float windsens_getwindspeed(void)
+{
+  /*                 Addr  Func  RegisterAd  Length____  CRC_______ */
+  uint8_t wsq[8] = { WSAD, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00 };
+  uint16_t crc = crc16_mb(wsq, 6);
+  wsq[6] = (crc >> 8);   /* MSB */
+  wsq[7] = (crc & 0xff); /* LSB */
+  uint8_t rcvbuf[10];
+  /* First clear anything that is still in the input buffer */
+  while (wk2132_get_available_to_read(windsensport) > 0) {
+    wk2132_read_serial(windsensport, (char *)rcvbuf, 1);
+  }
+  switchtoTX();
+  wk2132_write_serial(windsensport, (const char *)wsq, sizeof(wsq));
+  wk2132_flush(windsensport);
+  switchtoRX();
+  /* We expect a reply of exactly 7 bytes, so wait for that with timeout */
+  time_t stts = time(NULL);
+  int bav;
+  do {
+    vTaskDelay(pdMS_TO_TICKS(333));
+    bav = wk2132_get_available_to_read(windsensport);
+  } while ((bav < 7) && ((time(NULL) - stts) < 3));
+  if (bav == 7) {
+    wk2132_read_serial(windsensport, (char *)rcvbuf, 7);
+    /* check received data */
+    uint16_t crc = crc16_mb(rcvbuf, 5);
+    if ((rcvbuf[0] != WSAD) || (rcvbuf[1] != 0x03)
+     || (rcvbuf[2] != 0x02)
+     || ((crc >> 8) != rcvbuf[5]) || ((crc & 0xff) != rcvbuf[6])) {
+      ESP_LOGE("windsens.c", "Invalid reply from wind-speed-sensor received:");
+      ESP_LOGE("windsens.c", " `- %02x %02x %02x %02x %02x %02x %02x",
+                           rcvbuf[0], rcvbuf[1], rcvbuf[2], rcvbuf[3],
+                           rcvbuf[4], rcvbuf[5], rcvbuf[6]);
+      ESP_LOGE("windsens.c", " `- calculated CRC: %04x", crc);
+      return -1;
+    }
+    int calcsp = (rcvbuf[3] * 256) + rcvbuf[4];
+    return ((float)calcsp / 10.0);
+  }
+  ESP_LOGE("windsens.c", "No (valid) reply received from wind-speed-sensor (%d bytes)", bav);
+  return -1.0;
+}
+
