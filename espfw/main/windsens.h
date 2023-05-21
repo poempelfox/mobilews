@@ -1,7 +1,7 @@
 
 /* Functions for talking to our wind sensors:
  * DFROBOT SEN0483 Wind speed sensor
- * DFROBOT SEN0482 Wind direction sensor
+ * DFROBOT SEN0482 (V2) Wind direction sensor
  * Both are connected via RS485 */
 
 #ifndef _WINDSENS_H_

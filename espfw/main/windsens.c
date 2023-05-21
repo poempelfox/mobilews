@@ -1,6 +1,6 @@
 /* Functions for talking to our wind sensors:
  * DFROBOT SEN0483 Wind speed sensor
- * DFROBOT SEN0482 Wind direction sensor
+ * DFROBOT SEN0482 (V2) Wind direction sensor
  * Both are connected via RS485 */
 
 #include <driver/gpio.h>
@@ -21,10 +21,13 @@ static uint8_t windsensport;
  * and the wind speed sensor unfortunately is 0x02, meaning they
  * cannot coexist on the RS485-Modbus in factory config. At least
  * one of them will need to be reprogrammed before they can be
- * used. See FIXME */
+ * used together. See windsens_init() for one ugly way to do that. */
 
 /* What modbus-address does the wind direction sensor use? */
-#define WDAD 0x02
+#define WDAD 0x23
+
+/* What modbus-address does the wind speed sensor use? */
+#define WSAD 0x02
 
 static void switchtoRX(void)
 {
@@ -72,6 +75,59 @@ void windsens_init(uint8_t wsp)
   ESP_ERROR_CHECK(gpio_config(&diswpi));
   switchtoRX();
   wk2132_serialportinit(windsensport, 9600); /* Wind sensors run at 9600 baud */
+#if 0
+  /* This bit here reprograms everything that is currently on the modbus to
+   * a different address. For very obvious reasons, this should NOT normally
+   * be compiled in. You need to
+   * - make absolutely sure there is ONLY ONE device connected on the modbus
+   * - set the "#if 0" above to 1, recompile and reflash
+   * - wait till it says it is done
+   * - set the "#if 1" back to 0, recompile and reflash
+   * - power-cycle the sensor.
+   */
+  ESP_LOGI("wk2132.c", "=================================================================");
+  ESP_LOGI("wk2132.c", "= REPROGRAMMING MODBUS ADDRESS - THIS IS NOT A NORMAL FIRMWARE  =");
+  ESP_LOGI("wk2132.c", "=================================================================");
+  uint8_t newad = 0x23;
+  uint8_t reprogrammsg[] = { 0x00,        /* Slave Address, 0 == broadcast to all devices */
+                             0x10,        /* Function code: write multiple registers */
+                             0x10, 0x00,  /* Register start address: 0x1000 (which contains
+                                           * the slave address) */
+                             0x00, 0x01,  /* Length of the write (1x 16 bit) */
+                             0x02,        /* Number of bytes */
+                             0x00, newad, /* The new value to be written - new address in LSB */
+                             0x00, 0x00   /* the CRC (will be filled below) */
+                           };
+  uint16_t crc = crc16_mb(reprogrammsg, 9);
+  reprogrammsg[9] = crc >> 8;
+  reprogrammsg[10] = crc & 0xff;
+  vTaskDelay(pdMS_TO_TICKS(1333)); /* The bus needs to have been idle for a while before we can send */
+  switchtoTX();
+  wk2132_write_serial(windsensport, (const char *)reprogrammsg, sizeof(reprogrammsg));
+  wk2132_flush(windsensport);
+  switchtoRX();
+  int bav;
+  time_t stts = time(NULL);
+  do {
+    vTaskDelay(pdMS_TO_TICKS(333));
+    bav = wk2132_get_available_to_read(windsensport);
+  } while ((bav < 7) && ((time(NULL) - stts) < 10));
+  if (bav >= 7) {
+    uint8_t rbuf[bav];
+    wk2132_read_serial(windsensport, (char *)rbuf, bav);
+    ESP_LOGI("wk2132.c", "Received %u bytes:", bav);
+    for (int i = 0; i < bav; i++) {
+      ESP_LOGI("wk2132.c", " 0x%02x", rbuf[i]);
+    }
+  }
+  ESP_LOGI("wk2132.c", "=== END OF MODBUS ADDRESS REPROGRAMMING ===");
+  ESP_LOGI("wk2132.c", "This will now go into an endless loop. You need to");
+  ESP_LOGI("wk2132.c", "flash proper firmware to the ESP32 again, and then");
+  ESP_LOGI("wk2132.c", "also powercycle the sensor whose address was just changed.");
+  for (int i = 0; i < 999999; i++) {
+    vTaskDelay(pdMS_TO_TICKS(5000));
+  }
+#endif
 }
 
 float windsens_getwinddir(void)
