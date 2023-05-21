@@ -9,6 +9,10 @@
 #include "wk2132.h"
 #include "sdkconfig.h"
 
+#define I2C_MASTER_TIMEOUT_MS 1000  /* Timeout for I2C communication */
+
+#define WK2132DEBUG 0   /* Logs practically all I2C communication when set to 1 */
+
 /* The following is the BASE address of the chip. Because the chip
  * misuses I2C-address-bits to select different functions, it will
  * always respond to that address AND the 7 following addresses.
@@ -19,19 +23,21 @@
  * List of all base addresses selectable by the DIP switches:
  * 0x10 (00), 0x30 (01), 0x50 (10), 0x70 (11) */
 #define WK2132BASEADDR 0x70
-#define I2C_MASTER_TIMEOUT_MS 1000  /* Timeout for I2C communication */
 
 /* These are added to the I2C base address. */
 #define WK2132_CHAN0 0x00
 #define WK2132_CHAN1 0x02
 /* Not on this chip model: #define WK2132_CHAN2 0x04 */
 /* Not on this chip model: #define WK2132_CHAN3 0x06 */
+#define WK2132_NUM_CHANS 2  /* We have 2 channels, "0" and "1" */
 #define WK2132_REGS  0x00
 #define WK2132_FIFO  0x01
 
 /* the following defines are mostly c+p from dfrobot - again,
  * there is no english data sheet we could use instead. */
-/* Global registers. These are accessible through every sub-UARTs register space. */
+
+/* Global registers. These are ONLY accessible through sub-UART 0 register
+ * space! */
 #define REG_WK2132_GENA   0x00   // Global control register, control sub UART clock enable
 #define REG_WK2132_GRST   0x01   // Global sub UART reset register, reset a sub UART independently through software
 #define REG_WK2132_GMUT   0x02   // Global main UART control register, and will be used only when the main UART is selected as UART, no need to be set here.
@@ -66,7 +72,7 @@
 #define FEXTOSC         14745600L // External cystal frequency 14.7456MHz
 
 static i2c_port_t wk2132i2cport;
-static uint8_t lastselectedpage = 99;
+static uint8_t lastselectedpage[2] = { 99, 99 };
 
 #define GETI2CAD(type, sub_uart) \
   (WK2132BASEADDR | type | ((sub_uart == 1) ? WK2132_CHAN1 : WK2132_CHAN0))
@@ -77,16 +83,22 @@ static esp_err_t wk2132_register_read_byte(uint8_t reg_addr, uint8_t sub_uart, u
     uint8_t write_buf[2];
     uint8_t i2caddr = GETI2CAD(WK2132_REGS, sub_uart);
     page = page & 0x01; // Only one bit allowed.
-    if (page != lastselectedpage) { /* Switch page */
+    if (sub_uart >= WK2132_NUM_CHANS) {
+      ESP_LOGE("wk2132.c", "non-existant UART %u addressed", sub_uart);
+    }
+    if (page != lastselectedpage[sub_uart]) { /* Switch page */
+#if (WK2132DEBUG > 0)
+      ESP_LOGI("wk2132.c", "switching page to %u on UART %u", page, sub_uart);
+#endif /* WK2132DEBUG */
       write_buf[0] = REG_WK2132_SPAGE;
       write_buf[1] = page;
       ret = i2c_master_write_to_device(wk2132i2cport, i2caddr, write_buf, 2,
                                        pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
       if (ret != ESP_OK) { /* that did not work */
-        ESP_LOGE("wk2132.c", "could not select page %02x on WK2132.\n", page);
+        ESP_LOGE("wk2132.c", "could not select page %02x on WK2132.", page);
         return ret;
       }
-      lastselectedpage = page;
+      lastselectedpage[sub_uart] = page;
     }
     write_buf[0] = reg_addr;
     ret = i2c_master_write_read_device(wk2132i2cport, i2caddr,
@@ -94,7 +106,11 @@ static esp_err_t wk2132_register_read_byte(uint8_t reg_addr, uint8_t sub_uart, u
                                        data, 1,      /* What we read */
                                        pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
     if (ret != ESP_OK) { /* that did not work */
-      ESP_LOGE("wk2132.c", "could not read register %02x on WK2132.\n", reg_addr);
+      ESP_LOGE("wk2132.c", "could not read register %02x on WK2132.", reg_addr);
+    } else {
+#if (WK2132DEBUG > 0)
+      ESP_LOGI("wk2132.c", "read %02x from register %02x on UART %u, I2C %02x", *data, reg_addr, sub_uart, i2caddr);
+#endif /* WK2132DEBUG */
     }
     return ret;
 }
@@ -105,7 +121,11 @@ static esp_err_t wk2132_register_write_byte(uint8_t reg_addr, uint8_t sub_uart, 
     uint8_t write_buf[2];
     uint8_t i2caddr = GETI2CAD(WK2132_REGS, sub_uart);
     page = page & 0x01; // Only one bit allowed.
-    if (page != lastselectedpage) { /* Switch page */
+    if (sub_uart >= WK2132_NUM_CHANS) {
+      ESP_LOGE("wk2132.c", "non-existant UART %u addressed", sub_uart);
+    }
+    if (page != lastselectedpage[sub_uart]) { /* Switch page */
+      //ESP_LOGI("wk2132.c", "switching page to %u on UART %u", page, sub_uart);
       write_buf[0] = REG_WK2132_SPAGE;
       write_buf[1] = page;
       ret = i2c_master_write_to_device(wk2132i2cport, i2caddr, write_buf, 2,
@@ -114,8 +134,11 @@ static esp_err_t wk2132_register_write_byte(uint8_t reg_addr, uint8_t sub_uart, 
         ESP_LOGE("wk2132.c", "could not select page %02x on WK2132.\n", page);
         return ret;
       }
-      lastselectedpage = page;
+      lastselectedpage[sub_uart] = page;
     }
+#if (WK2132DEBUG > 0)
+    ESP_LOGI("wk2132.c", "writing %02x to register %02x on UART %u, I2C %02x", data, reg_addr, sub_uart, i2caddr);
+#endif /* WK2132DEBUG */
     write_buf[0] = reg_addr;
     write_buf[1] = data;
     ret = i2c_master_write_to_device(wk2132i2cport, i2caddr, write_buf, 2,
@@ -145,18 +168,21 @@ void wk2132_init(i2c_port_t port)
 void wk2132_serialportinit(uint8_t sub_uart, long baudrate)
 {
     uint8_t d;
+    if (sub_uart >= WK2132_NUM_CHANS) {
+      ESP_LOGE("wk2132.c", "non-existant UART %u addressed", sub_uart);
+    }
     /* First enable the clock for the port. */
-    wk2132_register_read_byte(REG_WK2132_GENA, sub_uart, 0, &d);
+    wk2132_register_read_byte(REG_WK2132_GENA, 0, 0, &d); // Global register!
     d = d | (1 << sub_uart);
-    wk2132_register_write_byte(REG_WK2132_GENA, sub_uart, 0, d);
+    wk2132_register_write_byte(REG_WK2132_GENA, 0, 0, d); // Global register!
     /* Now soft-reset and unsleep the port */
-    wk2132_register_read_byte(REG_WK2132_GRST, sub_uart, 0, &d);
+    wk2132_register_read_byte(REG_WK2132_GRST, 0, 0, &d); // Global register!
     d = d & ~(1 << (sub_uart + 4)); /* Clear the sleep bit */
     d = d | (1 << sub_uart); /* Set the soft-reset bit */
-    wk2132_register_write_byte(REG_WK2132_GRST, sub_uart, 0, d);
+    wk2132_register_write_byte(REG_WK2132_GRST, 0, 0, d); // Global register!
     int repctr = 1000;
     do { /* Wait for the soft-reset bit we just set to clear. */
-      esp_err_t e = wk2132_register_read_byte(REG_WK2132_GRST, sub_uart, 0, &d);
+      esp_err_t e = wk2132_register_read_byte(REG_WK2132_GRST, 0, 0, &d); // Global register!
       if (e != ESP_OK) { break; }
       if ((d & (1 << sub_uart)) == 0) { break; } /* the bit has cleared! */
       repctr--;
@@ -187,6 +213,9 @@ void wk2132_serialportinit(uint8_t sub_uart, long baudrate)
 uint8_t wk2132_get_available_to_read(uint8_t sub_uart)
 {
   uint8_t bc;
+  if (sub_uart >= WK2132_NUM_CHANS) {
+    ESP_LOGE("wk2132.c", "non-existant UART %u addressed", sub_uart);
+  }
   if (wk2132_register_read_byte(REG_WK2132_RFCNT, sub_uart, 0, &bc) != ESP_OK) {
     return 0;
   }
@@ -197,18 +226,25 @@ uint8_t wk2132_read_serial(uint8_t sub_uart, char * buf, uint8_t len)
 {
   uint8_t res = 0;
   uint8_t bc;
+  uint8_t i2caddr = GETI2CAD(WK2132_FIFO, sub_uart);
+  if (sub_uart >= WK2132_NUM_CHANS) {
+    ESP_LOGE("wk2132.c", "non-existant UART %u addressed", sub_uart);
+  }
   /* Find out how many bytes are available in the RX FIFO, and read at most that. */
   wk2132_register_read_byte(REG_WK2132_RFCNT, sub_uart, 0, &bc);
   if (bc > len) { bc = len; }
   for (int i = 0; i < bc; i++) {
     esp_err_t e;
     e = i2c_master_read_from_device(wk2132i2cport,
-                                    GETI2CAD(WK2132_FIFO, sub_uart),
-                                    (uint8_t *)&buf[i], 1,
+                                    i2caddr, (uint8_t *)&buf[i], 1,
                                     pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
     if (e != ESP_OK) {
-      ESP_LOGE("wk2132", "Failed to read from FIFO on sub_uart %02x", sub_uart);
+      ESP_LOGE("wk2132.c", "Failed to read from FIFO on sub_uart %02x", sub_uart);
       break;
+    } else {
+#if WK2132DEBUG > 0
+      ESP_LOGI("wk2132.c", "read %02x from FIFO on UART %d, I2C %02x", buf[i], sub_uart, i2caddr);
+#endif /* WK2132DEBUG */
     }
     res++;
   }
@@ -219,6 +255,10 @@ uint8_t wk2132_write_serial(uint8_t sub_uart, const char * buf, uint8_t len)
 {
   uint8_t res = 0;
   uint8_t bc;
+  uint8_t i2caddr = GETI2CAD(WK2132_FIFO, sub_uart);
+  if (sub_uart >= WK2132_NUM_CHANS) {
+    ESP_LOGE("wk2132.c", "non-existant UART %u addressed", sub_uart);
+  }
   /* Find out how much space is available in the TX FIFO, and write at most that. */
   wk2132_register_read_byte(REG_WK2132_TFCNT, sub_uart, 0, &bc);
   bc = 0xff - bc;
@@ -226,12 +266,15 @@ uint8_t wk2132_write_serial(uint8_t sub_uart, const char * buf, uint8_t len)
   for (int i = 0; i < bc; i++) {
     esp_err_t e;
     e = i2c_master_write_to_device(wk2132i2cport,
-                                   GETI2CAD(WK2132_FIFO, sub_uart),
-                                   (const uint8_t *)&buf[i], 1,
+                                   i2caddr, (const uint8_t *)&buf[i], 1,
                                    pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
     if (e != ESP_OK) {
-      ESP_LOGE("wk2132", "Failed to write to FIFO on sub_uart %02x", sub_uart);
+      ESP_LOGE("wk2132.c", "Failed to write to FIFO on sub_uart %02x", sub_uart);
       break;
+    } else {
+#if (WK2132DEBUG > 0)
+      ESP_LOGI("wk2132.c", "wrote %02x to FIFO on UART %d, I2C %02x", buf[i], sub_uart, i2caddr);
+#endif /* WK2132DEBUG */
     }
     res++;
   }
@@ -243,10 +286,13 @@ void wk2132_flush(uint8_t sub_uart)
   esp_err_t e;
   uint8_t d;
   time_t stati = time(NULL);
+  if (sub_uart >= WK2132_NUM_CHANS) {
+    ESP_LOGE("wk2132.c", "non-existant UART %u addressed", sub_uart);
+  }
   do {
     e = wk2132_register_read_byte(REG_WK2132_FSR, sub_uart, 0, &d);
     if (e != ESP_OK) break;
-    if ((time(NULL) - stati) > 3) break; /* Timeout, abort */
+    if ((time(NULL) - stati) > 2) break; /* Timeout, abort */
     /* Bits in FSR-register: Bit 0 - TX Busy, Bit 2 - TX FIFO not empty */
   } while ((d & 0x05) != 0);
 }
