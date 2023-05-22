@@ -6,15 +6,20 @@
 #include <freertos/task.h>
 #include <esp_sleep.h>
 #include <esp_log.h>
+#include "button.h"
 #include "i2c.h"
 #include "lps35hw.h"
 #include "mobilenet.h"
+#include "rgbled.h"
 #include "sht4x.h"
 #include "submit.h"
 #include "windsens.h"
 #include "wk2132.h"
 
 static const char *TAG = "mobilews";
+
+int nextwifistate = 0;
+int curwifistate = 0;
 
 #define sleep_ms(x) vTaskDelay(pdMS_TO_TICKS(x))
 
@@ -28,6 +33,8 @@ void app_main(void)
   wk2132_init(I2C_NUM_0);
   wk2132_serialportinit(0, 9600); /* RG15 runs at 9600 */
   windsens_init(1); /* Wind sensor is connected to wk2132 port 1 */
+  button_init();
+  rgbled_init();
   ESP_LOGI(TAG, "Early initialization finished, waking LTE module...");
   mn_wakeltemodule();
   /* Send setup commands to the IoT 6 click (uBlox Sara-R412M) module */
@@ -46,6 +53,12 @@ void app_main(void)
   time_t lastmeasts = time(NULL);
   time_t lastsuccsubmit = time(NULL);
   while (1) {
+    if (nextwifistate != curwifistate) {
+      curwifistate = nextwifistate;
+      ESP_LOGI(TAG, "Turning WiFi-AP %s", ((curwifistate == 1) ? "On" : "Off"));
+      rgbled_setled(0, 0, curwifistate * 55);
+      /* FIXME implement me */
+    }
     if ((time(NULL) - lastmeasts) >= 60) {
       /* Time for an update of all sensors. */
       lastmeasts = time(NULL);
@@ -68,6 +81,7 @@ void app_main(void)
       /* Now send them out via network */
       mn_wakeltemodule();
       mn_waitforltemoduleready();
+      rgbled_setled(55, 55, 0); /* Yellow - we're sending */
       mn_repeatcfgcmds();
       mn_waitfornetworkconn(181);
       mn_waitforipaddr(61);
@@ -86,6 +100,7 @@ void app_main(void)
           lastsuccsubmit = time(NULL);
         }
       }
+      rgbled_setled(0, 0, curwifistate * 44);
     }
     if ((time(NULL) - lastsuccsubmit) > 1800) {
       /* We have not successfully submitted any values in 30 minutes.
@@ -98,11 +113,16 @@ void app_main(void)
     long howmuchtosleep = (lastmeasts + 60) - time(NULL) - 1;
     if (howmuchtosleep > 60) { howmuchtosleep = 60; }
     if (howmuchtosleep > 0) {
-      /* FIXME: Not if WiFi is on! */
-      ESP_LOGI(TAG, "will now enter sleep mode for %ld seconds", howmuchtosleep);
-      /* This is given in microseconds */
-      esp_sleep_enable_timer_wakeup(howmuchtosleep * (int64_t)1000000);
-      esp_light_sleep_start();
+      if (curwifistate > 0) {
+        /* We cannot sleep if WiFi is on (else that would be unusable) */
+        ESP_LOGI(TAG, "will now idle for %ld seconds", howmuchtosleep);
+        vTaskDelay(pdMS_TO_TICKS(howmuchtosleep * 1000));
+      } else {
+        ESP_LOGI(TAG, "will now enter light sleep mode for %ld seconds", howmuchtosleep);
+        /* This is given in microseconds */
+        esp_sleep_enable_timer_wakeup(howmuchtosleep * (int64_t)1000000);
+        esp_light_sleep_start();
+      }
     }
   }
 }
