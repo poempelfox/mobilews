@@ -1,6 +1,7 @@
 
 #include <driver/gpio.h>
 #include <esp_log.h>
+#include <esp_sleep.h>
 #include <esp_timer.h>
 #include "button.h"
 
@@ -34,6 +35,11 @@ void buttonirq(void * arg)
   }
 }
 
+int button_getstate(void)
+{
+  return gpio_get_level(BUTTONGPIO);
+}
+
 void button_init(void)
 {
   gpio_config_t bu = {
@@ -53,5 +59,7 @@ void button_init(void)
   } else {
     ESP_ERROR_CHECK(gpio_isr_handler_add(BUTTONGPIO, buttonirq, NULL));
   }
+  /* Our pin going low may wake up from light sleep */
+  ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BUTTONGPIO, 0));
 }
 

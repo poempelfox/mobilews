@@ -118,10 +118,15 @@ void app_main(void)
         ESP_LOGI(TAG, "will now idle for %ld seconds", howmuchtosleep);
         vTaskDelay(pdMS_TO_TICKS(howmuchtosleep * 1000));
       } else {
-        ESP_LOGI(TAG, "will now enter light sleep mode for %ld seconds", howmuchtosleep);
-        /* This is given in microseconds */
-        esp_sleep_enable_timer_wakeup(howmuchtosleep * (int64_t)1000000);
-        esp_light_sleep_start();
+        if (button_getstate() == 0) { /* We cannot sleep, we'd be woken up instantly from the GPIO IRQ */
+          ESP_LOGI(TAG, "button still pressed...");
+          vTaskDelay(pdMS_TO_TICKS(1000));
+        } else {
+          ESP_LOGI(TAG, "will now enter light sleep mode for %ld seconds", howmuchtosleep);
+          /* This is given in microseconds */
+          esp_sleep_enable_timer_wakeup(howmuchtosleep * (int64_t)1000000);
+          esp_light_sleep_start();
+        }
       }
     }
   }
