@@ -6,11 +6,11 @@
 #define LEDGPIO 18
 
 /*
- * Low speed mode times:
- * T0H  0 code, high voltage time     0.5 us
- * T0L  0 code, low voltage time      2.0 us
- * T1H  1 code, high voltage time     1.2 us
- * T1L  1 code, low voltage time      1.3 us
+ * Timings we use, stolen off the internet:
+ * T0H  0 code, high voltage time     0.4 us
+ * T0L  0 code, low voltage time      0.9 us
+ * T1H  1 code, high voltage time     0.9 us
+ * T1L  1 code, low voltage time      0.4 us
  * RES  Reset low voltage time      >50.0 us
  * Data is sent in multiples of 24 bit,
  * 8 bits per color, MSB first, color sequence green-red-blue
