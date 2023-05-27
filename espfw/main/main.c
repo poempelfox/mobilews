@@ -1,11 +1,12 @@
 #include "sdkconfig.h"
+#include <esp_log.h>
+#include <esp_sleep.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <nvs_flash.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <esp_sleep.h>
-#include <esp_log.h>
 #include "button.h"
 #include "i2c.h"
 #include "lps35hw.h"
@@ -13,6 +14,7 @@
 #include "rgbled.h"
 #include "sht4x.h"
 #include "submit.h"
+#include "wifiap.h"
 #include "windsens.h"
 #include "wk2132.h"
 
@@ -26,6 +28,15 @@ int curwifistate = 0;
 void app_main(void)
 {
   ESP_LOGI(TAG, "Early initialization starting...");
+  /* WiFi will not work without nvs_flash_init. */
+  {
+    esp_err_t err = nvs_flash_init();
+    if ((err == ESP_ERR_NVS_NO_FREE_PAGES) || (err == ESP_ERR_NVS_NEW_VERSION_FOUND)) {
+      ESP_ERROR_CHECK(nvs_flash_erase());
+      err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+  }
   mn_init();
   i2c_port_init();
   sht4x_init(I2C_NUM_0);
@@ -35,6 +46,7 @@ void app_main(void)
   windsens_init(1); /* Wind sensor is connected to wk2132 port 1 */
   button_init();
   rgbled_init();
+  wifiap_init();
   ESP_LOGI(TAG, "Early initialization finished, waking LTE module...");
   mn_wakeltemodule();
   /* Send setup commands to the IoT 6 click (uBlox Sara-R412M) module */
@@ -49,7 +61,7 @@ void app_main(void)
   sendatcmd("AT+CGACT?", 4);
   sendatcmd("AT+CGDCONT?", 4);
 #endif
-  
+
   time_t lastmeasts = time(NULL);
   time_t lastsuccsubmit = time(NULL);
   while (1) {
@@ -57,7 +69,11 @@ void app_main(void)
       curwifistate = nextwifistate;
       ESP_LOGI(TAG, "Turning WiFi-AP %s", ((curwifistate == 1) ? "On" : "Off"));
       rgbled_setled(0, 0, curwifistate * 55);
-      /* FIXME implement me */
+      if (curwifistate == 0) {
+        wifiap_off();
+      } else {
+        wifiap_on();
+      }
     }
     if ((time(NULL) - lastmeasts) >= 60) {
       /* Time for an update of all sensors. */
