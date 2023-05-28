@@ -3,6 +3,7 @@
 #include <esp_sleep.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <math.h>
 #include <nvs_flash.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +15,7 @@
 #include "rgbled.h"
 #include "sht4x.h"
 #include "submit.h"
+#include "webserver.h"
 #include "wifiap.h"
 #include "windsens.h"
 #include "wk2132.h"
@@ -22,6 +24,11 @@ static const char *TAG = "mobilews";
 
 int nextwifistate = 0;
 int curwifistate = 0;
+
+/* Measured values, packaged for export to the WiFi webserver.
+ * activeevs marks which one of these has been fully updated. */
+struct ev evs[2];
+int activeevs = 0;
 
 #define sleep_ms(x) vTaskDelay(pdMS_TO_TICKS(x))
 
@@ -47,6 +54,7 @@ void app_main(void)
   button_init();
   rgbled_init();
   wifiap_init();
+  webserver_start();
   ESP_LOGI(TAG, "Early initialization finished, waking LTE module...");
   mn_wakeltemodule();
   /* Send setup commands to the IoT 6 click (uBlox Sara-R412M) module */
@@ -77,7 +85,9 @@ void app_main(void)
     }
     if ((time(NULL) - lastmeasts) >= 60) {
       /* Time for an update of all sensors. */
+      int naevs = (activeevs == 0) ? 1 : 0;
       lastmeasts = time(NULL);
+      evs[naevs].lastupd = lastmeasts;
       sht4x_startmeas();
       lps35hw_startmeas();
       sleep_ms(1111); /* Slightly more than a second is enough for all the sensors above */
@@ -110,12 +120,38 @@ void app_main(void)
         if (submit_to_wpd_multi(2, tosubmit) == 0) {
           lastsuccsubmit = time(NULL);
         }
+        evs[naevs].temp = temphum.temp;
+        evs[naevs].hum = temphum.hum;
+      } else {
+        evs[naevs].temp = NAN;
+        evs[naevs].hum = NAN;
       }
       if (press > 0) {
         if (submit_to_wpd("76", press) == 0) {
           lastsuccsubmit = time(NULL);
         }
+        evs[naevs].press = press;
+      } else {
+        evs[naevs].press = NAN;
       }
+      if ((wd > -0.01) && (wd < 360.01)) { /* Valid wind direction measurement */
+        if (submit_to_wpd("78", wd) == 0) {
+          lastsuccsubmit = time(NULL);
+        }
+        evs[naevs].winddirdeg = wd;
+      } else {
+        evs[naevs].winddirdeg = NAN;
+      }
+      if (ws > -0.01) { /* Valid wind speed measurement */
+        if (submit_to_wpd("79", ws) == 0) {
+          lastsuccsubmit = time(NULL);
+        }
+        evs[naevs].windspeed = ws;
+      } else {
+        evs[naevs].windspeed = NAN;
+      }
+      /* mark the updated values as the current ones for the webserver */
+      activeevs = naevs;
       rgbled_setled(0, 0, curwifistate * 44);
     }
     if ((time(NULL) - lastsuccsubmit) > 1800) {
