@@ -61,4 +61,8 @@ randomly switch between german and english, sorry about that.
     + I2C-to-Serial P2 "T" (blue) <-> MOD-RS485 "TXD" (Pin 3)
     + I2C-to-Serial P2 "R" (green) <-> MOD-RS485 "RXD" (Pin 4)
   - MOD-RS485 SCK (Pin 9) and SS# (Pin 10) <-> ESP32 GPIO13 (this is used to switch between "receiving" and "sending" on the half-duplex RS485 bus); we use a splitter cable to connect them both to one I/O pin.
+  - Note: If you look at the "UEXT" connector with the notch facing down, then Pin 1 is at the bottom left, 2 is top left, 9 is bottom right, 10 is top right.
+* Battery sensor
+  - we built an external voltage divider on a stripboard. It consists of a 1 MOhm resistor towards the "+" of the AGM battery, 47 kOhm towards GND, and a small capacitor parallel to the 47 kOhm (to make readings more stable).
+  - the middle of the voltage divider needs to connect to ESP32 GPIO6 (a.ka. ADC1_CHANNEL_5)
 

@@ -28,9 +28,9 @@ This is the debug interface for Foxis Mobile Weather station.<br>
 Log in to Admin Interface:<br>
 <form action="/admin" method="POST">
 Admin-Password:
-<input type="text" name="updatepw">
+<input type="text" name="adminpw">
 <input type="hidden" name="action" value="overview">
-<input type="submit" name="su" value="Execute Action">
+<input type="submit" name="su" value="Log In">
 </form>
 </body></html>
 )EOSTP";
@@ -131,6 +131,7 @@ static char * printallsensors(int t, char * pfp)
   pfp = printonefloatsensor(t, pfp, "press",     "%.3f", evs[e].press);
   pfp = printonefloatsensor(t, pfp, "windspeed", "%.1f", evs[e].windspeed);
   pfp = printonefloatsensor(t, pfp, "winddir",   "%.1f", evs[e].winddirdeg);
+  pfp = printonefloatsensor(t, pfp, "batvolt",   "%.2f", evs[e].batvolt);
   return pfp;
 }
 

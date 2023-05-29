@@ -8,6 +8,7 @@
  * "ev" as in _E_xported _V_alues */
 struct ev {
   time_t lastupd;
+  float batvolt;
   float hum;
   float press;
   float temp;

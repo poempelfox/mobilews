@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include "batsens.h"
 #include "button.h"
 #include "i2c.h"
 #include "lps35hw.h"
@@ -53,6 +54,7 @@ void app_main(void)
   windsens_init(1); /* Wind sensor is connected to wk2132 port 1 */
   button_init();
   rgbled_init();
+  batsens_init();
   wifiap_init();
   webserver_start();
   ESP_LOGI(TAG, "Early initialization finished, waking LTE module...");
@@ -104,6 +106,8 @@ void app_main(void)
       ESP_LOGI(TAG, "|- wind direction: %.1f degrees", wd);
       float ws = windsens_getwindspeed();
       ESP_LOGI(TAG, "|- wind speed: %.1f m/s  %.2f km/h", ws, (ws * 3600.0 / 1000.0));
+      float bv = batsens_read();
+      ESP_LOGI(TAG, "|- battery voltage: %.1fV", bv);
       /* Now send them out via network */
       mn_wakeltemodule();
       mn_waitforltemoduleready();
@@ -149,6 +153,11 @@ void app_main(void)
         evs[naevs].windspeed = ws;
       } else {
         evs[naevs].windspeed = NAN;
+      }
+      if (bv > -0.01) { /* Valid battery measurement */
+        evs[naevs].batvolt = bv;
+      } else {
+        evs[naevs].batvolt = NAN;
       }
       /* mark the updated values as the current ones for the webserver */
       activeevs = naevs;
