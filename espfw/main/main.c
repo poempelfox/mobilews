@@ -107,7 +107,7 @@ void app_main(void)
       float ws = windsens_getwindspeed();
       ESP_LOGI(TAG, "|- wind speed: %.1f m/s  %.2f km/h", ws, (ws * 3600.0 / 1000.0));
       float bv = batsens_read();
-      ESP_LOGI(TAG, "|- battery voltage: %.1fV", bv);
+      ESP_LOGI(TAG, "|- battery voltage: %.2fV", bv);
       /* Now send them out via network */
       mn_wakeltemodule();
       mn_waitforltemoduleready();
@@ -187,6 +187,7 @@ void app_main(void)
           /* This is given in microseconds */
           esp_sleep_enable_timer_wakeup(howmuchtosleep * (int64_t)1000000);
           esp_light_sleep_start();
+          button_rtcdetach(); /* needs to be called after sleep to detach the GPIO from the RTC again! */
         }
       }
     }

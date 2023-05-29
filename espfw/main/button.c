@@ -1,12 +1,20 @@
 
 #include <driver/gpio.h>
+#include <driver/rtc_io.h>
 #include <esp_log.h>
 #include <esp_sleep.h>
 #include <esp_timer.h>
 #include "button.h"
 
-/* The button is on GPIO0 on our board */
-#define BUTTONGPIO 0
+/* The plan was to use the onboard button that is wired to
+ * GPIO0 on our board. Unfortunately, that did not work out,
+ * it is either no longer pulled up when USB is disconnected,
+ * or triggers accidental resets when released.
+ * So we had to resort to another GPIO that you'll just have
+ * to short to GND externally...
+ * And the lucky winner is: GPIO17. Right next to 5V, so
+ * be sure to NOT short that to ground... */
+#define BUTTONGPIO 17
 
 /* in main.c - we set this to turn on or off WiFi. */
 extern int nextwifistate;
@@ -45,11 +53,17 @@ void button_init(void)
   gpio_config_t bu = {
     .pin_bit_mask = (1ULL << BUTTONGPIO),
     .mode = GPIO_MODE_INPUT,
-    .pull_up_en = 1,
-    .pull_down_en = 0,
+    .pull_up_en = GPIO_PULLUP_ENABLE,
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
     .intr_type = GPIO_INTR_ANYEDGE,
   };
   ESP_ERROR_CHECK(gpio_config(&bu));
+  /* The documentation here is contradictory: In one place,
+   * it says to use the generic gpip_pullup_en because it
+   * would work with both RTC and non-RTC pins. In another
+   * place however, it says one NEEDS to call rtc_gpio_pullup_en
+   * before sleeping. */
+  ESP_ERROR_CHECK(rtc_gpio_pullup_en(BUTTONGPIO));
   /* FIXME? We would actually want to use ESP_INTR_FLAG_EDGE, but
    * everything but 0 throws an error on the ESP32-S2. */
   esp_err_t iise = gpio_install_isr_service(0);
@@ -61,5 +75,10 @@ void button_init(void)
   }
   /* Our pin going low may wake up from light sleep */
   ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BUTTONGPIO, 0));
+}
+
+void button_rtcdetach(void)
+{
+  rtc_gpio_deinit(BUTTONGPIO);
 }
 

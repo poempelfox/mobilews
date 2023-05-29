@@ -52,7 +52,7 @@ float batsens_read(void)
    * ADC maximum: 0.75V, but we don't care - adc_cali_raw_to_voltage
    * already returned mV! */
   float res = ((float)v / 1000.0 ) * ((1000000.0 + 47000.0) / 47000.0);
-  ESP_LOGI("batsens.c", "v = %.2f (voltage on VD: %d, raw ADV: %d)", res, v, adcv);
+  ESP_LOGI("batsens.c", "v = %.2f (voltage on VD: %d mV, raw ADV: %d)", res, v, adcv);
   return res;
 }
 
