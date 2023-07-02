@@ -14,6 +14,8 @@
 #include "lps35hw.h"
 #include "mobilenet.h"
 #include "rgbled.h"
+#include "rg15.h"
+#include "sen50.h"
 #include "sht4x.h"
 #include "submit.h"
 #include "webserver.h"
@@ -50,8 +52,10 @@ void app_main(void)
   sht4x_init(I2C_NUM_0);
   lps35hw_init(I2C_NUM_0);
   wk2132_init(I2C_NUM_0);
-  wk2132_serialportinit(0, 9600); /* RG15 runs at 9600 */
+  rg15_init(); /* Note: RG15 is connected to wk2132 port 0 */
   windsens_init(1); /* Wind sensor is connected to wk2132 port 1 */
+  sen50_init(I2C_NUM_1);
+  sen50_startmeas(); /* FIXME: We probably do not want this to run all the time. */
   button_init();
   rgbled_init();
   batsens_init();
@@ -92,13 +96,14 @@ void app_main(void)
       evs[naevs].lastupd = lastmeasts;
       sht4x_startmeas();
       lps35hw_startmeas();
+      rg15_requestread();
       sleep_ms(1111); /* Slightly more than a second is enough for all the sensors above */
       struct sht4xdata temphum;
       sht4x_read(&temphum);
       if (temphum.valid) {
         ESP_LOGI(TAG, "|- temp %.2f   hum %.1f", temphum.temp, temphum.hum);
       } else {
-        ESP_LOGI(TAG, "|- no valid temp/hum");
+        ESP_LOGW(TAG, "|- no valid temp/hum");
       }
       double press = lps35hw_readpressure();
       ESP_LOGI(TAG, "|- press %.3lfhPa", press);
@@ -108,6 +113,15 @@ void app_main(void)
       ESP_LOGI(TAG, "|- wind speed: %.1f m/s  %.2f km/h", ws, (ws * 3600.0 / 1000.0));
       float bv = batsens_read();
       ESP_LOGI(TAG, "|- battery voltage: %.2fV", bv);
+      float rgc = rg15_readraincount();
+      ESP_LOGI(TAG, "|- rain count: %.2f mm", rgc);
+      struct sen50data pm;
+      sen50_read(&pm);
+      if (pm.valid) {
+        ESP_LOGI(TAG, "|- PM1.0: %.1f  PM2.5: %.1f  PM4.0: %.1f  PM10.0: %.1f", pm.pm010, pm.pm025, pm.pm040, pm.pm100);
+      } else {
+        ESP_LOGW(TAG, "|- no valid particulate matter data");
+      }
       /* Now send them out via network */
       mn_wakeltemodule();
       mn_waitforltemoduleready();
