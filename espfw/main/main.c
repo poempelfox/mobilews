@@ -12,6 +12,7 @@
 #include "button.h"
 #include "i2c.h"
 #include "lps35hw.h"
+#include "ltr390.h"
 #include "mobilenet.h"
 #include "rgbled.h"
 #include "rg15.h"
@@ -51,6 +52,7 @@ void app_main(void)
   i2c_port_init();
   sht4x_init(I2C_NUM_0);
   lps35hw_init(I2C_NUM_0);
+  ltr390_init(I2C_NUM_0);
   wk2132_init(I2C_NUM_0);
   rg15_init(); /* Note: RG15 is connected to wk2132 port 0 */
   windsens_init(1); /* Wind sensor is connected to wk2132 port 1 */
@@ -97,6 +99,9 @@ void app_main(void)
       sht4x_startmeas();
       lps35hw_startmeas();
       rg15_requestread();
+      /* Read UV index and switch to ambient light measurement */
+      float uvind = ltr390_readuv();
+      ltr390_startalmeas();
       sleep_ms(1111); /* Slightly more than a second is enough for all the sensors above */
       struct sht4xdata temphum;
       sht4x_read(&temphum);
@@ -122,6 +127,11 @@ void app_main(void)
       } else {
         ESP_LOGW(TAG, "|- no valid particulate matter data");
       }
+      /* Read Ambient Light in Lux (may block for up to 500 ms!) and switch
+       * right back to UV mode */
+      float lux = ltr390_readal();
+      ltr390_startuvmeas();
+      ESP_LOGI(TAG, "|- UV: %.2f  AmbientLight: %.2f lux", uvind, lux);
       /* Now send them out via network */
       mn_wakeltemodule();
       mn_waitforltemoduleready();
