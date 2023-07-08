@@ -132,6 +132,13 @@ static char * printallsensors(int t, char * pfp)
   pfp = printonefloatsensor(t, pfp, "windspeed", "%.1f", evs[e].windspeed);
   pfp = printonefloatsensor(t, pfp, "winddir",   "%.1f", evs[e].winddirdeg);
   pfp = printonefloatsensor(t, pfp, "batvolt",   "%.2f", evs[e].batvolt);
+  pfp = printonefloatsensor(t, pfp, "raingc",    "%.3f", evs[e].raingc);
+  pfp = printonefloatsensor(t, pfp, "pm010",     "%.1f", evs[e].pm010);
+  pfp = printonefloatsensor(t, pfp, "pm025",     "%.1f", evs[e].pm025);
+  pfp = printonefloatsensor(t, pfp, "pm040",     "%.1f", evs[e].pm040);
+  pfp = printonefloatsensor(t, pfp, "pm100",     "%.1f", evs[e].pm100);
+  pfp = printonefloatsensor(t, pfp, "uvind",     "%.2f", evs[e].uvind);
+  pfp = printonefloatsensor(t, pfp, "amblight",  "%.3f", evs[e].amblight);
   return pfp;
 }
 

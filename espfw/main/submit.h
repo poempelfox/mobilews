@@ -9,6 +9,8 @@ struct wpd {
   float value;
 };
 
+/* Submits multiple values to wetter.poempelfox.de.
+ * Returns 0 on success. */
 int submit_to_wpd_multi(int arraysize, struct wpd * arrayofwpd);
 
 /* This is a convenience function, calling submit_to_wpd_multi

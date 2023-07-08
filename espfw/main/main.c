@@ -119,7 +119,11 @@ void app_main(void)
       float bv = batsens_read();
       ESP_LOGI(TAG, "|- battery voltage: %.2fV", bv);
       float rgc = rg15_readraincount();
-      ESP_LOGI(TAG, "|- rain count: %.2f mm", rgc);
+      if (rgc > -0.01) {
+        ESP_LOGI(TAG, "|- rain count: %.2f mm", rgc);
+      } else {
+        ESP_LOGI(TAG, "|- no valid rain counter data");
+      }
       struct sen50data pm;
       sen50_read(&pm);
       if (pm.valid) {
@@ -129,9 +133,9 @@ void app_main(void)
       }
       /* Read Ambient Light in Lux (may block for up to 500 ms!) and switch
        * right back to UV mode */
-      float lux = ltr390_readal();
+      float amblight = ltr390_readal();
       ltr390_startuvmeas();
-      ESP_LOGI(TAG, "|- UV: %.2f  AmbientLight: %.2f lux", uvind, lux);
+      ESP_LOGI(TAG, "|- UV: %.2f  AmbientLight: %.2f lux", uvind, amblight);
       /* Now send them out via network */
       mn_wakeltemodule();
       mn_waitforltemoduleready();
@@ -139,15 +143,13 @@ void app_main(void)
       mn_repeatcfgcmds();
       mn_waitfornetworkconn(181);
       mn_waitforipaddr(61);
+      struct wpd tosubmit[15]; /* we'll submit at most 13 values because we have that many sensors */
+      int nts = 0; /* Number of values to submit */
+      /* Lets define a little helper macro to limit the copy+paste orgies */
+      #define QUEUETOSUBMIT(s, v)  tosubmit[nts].sensorid = s; tosubmit[nts].value = v; nts++;
       if (temphum.valid) {
-        struct wpd tosubmit[2];
-        tosubmit[0].sensorid = "74";
-        tosubmit[0].value = temphum.temp;
-        tosubmit[1].sensorid = "75";
-        tosubmit[1].value = temphum.hum;
-        if (submit_to_wpd_multi(2, tosubmit) == 0) {
-          lastsuccsubmit = time(NULL);
-        }
+        QUEUETOSUBMIT("74", temphum.temp);
+        QUEUETOSUBMIT("75", temphum.hum);
         evs[naevs].temp = temphum.temp;
         evs[naevs].hum = temphum.hum;
       } else {
@@ -155,36 +157,72 @@ void app_main(void)
         evs[naevs].hum = NAN;
       }
       if (press > 0) {
-        if (submit_to_wpd("76", press) == 0) {
-          lastsuccsubmit = time(NULL);
-        }
+        QUEUETOSUBMIT("76", press);
         evs[naevs].press = press;
       } else {
         evs[naevs].press = NAN;
       }
       if ((wd > -0.01) && (wd < 360.01)) { /* Valid wind direction measurement */
-        if (submit_to_wpd("78", wd) == 0) {
-          lastsuccsubmit = time(NULL);
-        }
+        QUEUETOSUBMIT("78", wd);
         evs[naevs].winddirdeg = wd;
       } else {
         evs[naevs].winddirdeg = NAN;
       }
       if (ws > -0.01) { /* Valid wind speed measurement */
-        if (submit_to_wpd("79", ws) == 0) {
-          lastsuccsubmit = time(NULL);
-        }
+        QUEUETOSUBMIT("79", ws);
         evs[naevs].windspeed = ws;
       } else {
         evs[naevs].windspeed = NAN;
       }
       if (bv > -0.01) { /* Valid battery measurement */
+        QUEUETOSUBMIT("80", bv);
         evs[naevs].batvolt = bv;
       } else {
         evs[naevs].batvolt = NAN;
       }
+      if (rgc > -0.01) { /* Valid rain gauge measurement */
+        QUEUETOSUBMIT("81", rgc);
+        evs[naevs].raingc = rgc;
+      } else {
+        evs[naevs].raingc = NAN;
+      }
+      if (pm.valid) { /* Valid particulate matter measurement */
+        QUEUETOSUBMIT("82", pm.pm010);
+        QUEUETOSUBMIT("83", pm.pm025);
+        QUEUETOSUBMIT("84", pm.pm040);
+        QUEUETOSUBMIT("85", pm.pm100);
+        evs[naevs].pm010 = pm.pm010;
+        evs[naevs].pm025 = pm.pm025;
+        evs[naevs].pm040 = pm.pm040;
+        evs[naevs].pm100 = pm.pm100;
+      } else {
+        evs[naevs].pm010 = NAN;
+        evs[naevs].pm025 = NAN;
+        evs[naevs].pm040 = NAN;
+        evs[naevs].pm100 = NAN;
+      }
+      if (uvind > -0.01) { /* Valid UV-Index measurement */
+        QUEUETOSUBMIT("86", uvind);
+        evs[naevs].uvind = uvind;
+      } else {
+        evs[naevs].uvind = NAN;
+      }
+      if (amblight > -0.01) { /* Valid Ambient Light measurement */
+        QUEUETOSUBMIT("87", amblight);
+        evs[naevs].amblight = amblight;
+      } else {
+        evs[naevs].amblight = NAN;
+      }
+      /* Clean up helper macro */
+      #undef QUEUETOSUBMIT
       /* mark the updated values as the current ones for the webserver */
       activeevs = naevs;
+      if (nts > 0) { /* Is there at least one valid value to submit? */
+        ESP_LOGI(TAG, "have %d values to submit...", nts);
+        if (submit_to_wpd_multi(nts, tosubmit) == 0) {
+          lastsuccsubmit = time(NULL);
+        }
+      }
       rgbled_setled(0, 0, curwifistate * 44);
     }
     if ((time(NULL) - lastsuccsubmit) > 1800) {

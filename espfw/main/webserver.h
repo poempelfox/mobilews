@@ -8,10 +8,17 @@
  * "ev" as in _E_xported _V_alues */
 struct ev {
   time_t lastupd;
+  float amblight; /* Ambient Light */
   float batvolt;
   float hum;
   float press;
+  float raingc; /* Rain Gauge Counter */
+  float pm010;  /* Particulate matter 1.0 */
+  float pm025;
+  float pm040;
+  float pm100;  /* Particulate matter 10.0 */
   float temp;
+  float uvind;  /* UV Index */
   float windspeed;
   float winddirdeg;
 };
