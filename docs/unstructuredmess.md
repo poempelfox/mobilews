@@ -65,4 +65,12 @@ randomly switch between german and english, sorry about that.
 * Battery sensor
   - we built an external voltage divider on a stripboard. It consists of a 1 MOhm resistor towards the "+" of the AGM battery, 47 kOhm towards GND, and a small capacitor parallel to the 47 kOhm (to make readings more stable).
   - the middle of the voltage divider needs to connect to ESP32 GPIO6 (a.ka. ADC1_CHANNEL_5)
+* WiFi on/off
+  - this is not permanently wired, but if you want to turn WiFi on or off, connect GPIO17 to GND for at least 3 seconds.
+  - GPIO17 is right next to 5V on the ESP32-S2, be careful not to touch that.
+* RG15
+  - V+ <-> 5V, white cable
+  - GND <-> GND, brown cable
+  - Serial In <-> I2C-to-Serial P1 "T", yellow cable
+  - Serial Out <-> I2C-to-Serial P1 "R", green cable
 
