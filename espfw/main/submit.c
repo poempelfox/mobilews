@@ -22,7 +22,7 @@ int submit_to_wpd_multi(int arraysize, struct wpd * aowpd)
     }
     int sock = mn_opentcpconn("wetter.poempelfox.de", 80, 61);
     if (sock >= 0) {
-      char tmpstr[300];
+      char tmpstr[700];
       strcpy(tmpstr, "POST /api/pushmeasurement/ HTTP/1.1\r\n");
       strcat(tmpstr, "Host: wetter.poempelfox.de\r\n");
       strcat(tmpstr, "Connection: close\r\n");
@@ -40,6 +40,9 @@ int submit_to_wpd_multi(int arraysize, struct wpd * aowpd)
           sprintf(&tmpstr[strlen(tmpstr)],
                   "{\"value_type\":\"%s\",\"value\":\"%.3f\"}",
                   aowpd[i].sensorid, aowpd[i].value);
+        }
+        if (strlen(tmpstr) > (sizeof(tmpstr) - 100)) {
+          ESP_LOGW(TAG, "Getting dangerously close to tmpstr size in %s", __FUNCTION__);
         }
       }
       strcat(tmpstr, "]}\n");
