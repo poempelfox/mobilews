@@ -62,6 +62,12 @@ randomly switch between german and english, sorry about that.
     + I2C-to-Serial P2 "R" (green) <-> MOD-RS485 "RXD" (Pin 4)
   - MOD-RS485 SCK (Pin 9) and SS# (Pin 10) <-> ESP32 GPIO13 (this is used to switch between "receiving" and "sending" on the half-duplex RS485 bus); we use a splitter cable to connect them both to one I/O pin.
   - Note: If you look at the "UEXT" connector with the notch facing down, then Pin 1 is at the bottom left, 2 is top left, 9 is bottom right, 10 is top right.
+* Wind sensors
+  - these come with a special outdoor plug, and a matching (pretty long) cable.
+  - At the other end of that cable:
+    + Red and Black: these are the power supply. These sensors need 7-24V, so connect these to 12+V!
+    + Yellow: RS485 "+" / "A" - connect to the screw terminal on Olimex MOD-RS485. These are labeled at the bottom of the PCB.
+    + Green: RS485 "-" / "B" - connect to the screw terminal on Olimex MOD-RS485.
 * Battery sensor
   - we built an external voltage divider on a stripboard. It consists of a 1 MOhm resistor towards the "+" of the AGM battery, 47 kOhm towards GND, and a small capacitor parallel to the 47 kOhm (to make readings more stable).
   - the middle of the voltage divider needs to connect to ESP32 GPIO6 (a.ka. ADC1_CHANNEL_5)
@@ -69,8 +75,12 @@ randomly switch between german and english, sorry about that.
   - this is not permanently wired, but if you want to turn WiFi on or off, connect GPIO17 to GND for at least 3 seconds.
   - GPIO17 is right next to 5V on the ESP32-S2, be careful not to touch that.
 * RG15
-  - V+ <-> 5V, white cable
-  - GND <-> GND, brown cable
-  - Serial In <-> I2C-to-Serial P1 "T", yellow cable
-  - Serial Out <-> I2C-to-Serial P1 "R", green cable
+  - V+ <-> 5V, white cable, plugged into main power distribution board
+  - GND <-> GND, brown cable, for easier cabling plugged into I2C-to-Serial P1 GND
+  - Serial In <-> I2C-to-Serial P1 "T" (green), yellow cable
+  - Serial Out <-> I2C-to-Serial P1 "R" (blue), green cable
+
+## TODOs
+
+* we currently run the SEN50 non-stop. There is power-saving potential there, as it consumes 63-70 mA that way, vs. 3 when powered down...
 
