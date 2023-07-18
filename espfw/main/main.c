@@ -84,7 +84,7 @@ void app_main(void)
     if (nextwifistate != curwifistate) {
       curwifistate = nextwifistate;
       ESP_LOGI(TAG, "Turning WiFi-AP %s", ((curwifistate == 1) ? "On" : "Off"));
-      rgbled_setled(0, 0, curwifistate * 55);
+      rgbled_setled(0, 0, curwifistate * 33);
       if (curwifistate == 0) {
         wifiap_off();
       } else {
@@ -139,7 +139,7 @@ void app_main(void)
       /* Now send them out via network */
       mn_wakeltemodule();
       mn_waitforltemoduleready();
-      rgbled_setled(55, 55, 0); /* Yellow - we're sending */
+      rgbled_setled(33, 33, 0); /* Yellow - we're sending */
       mn_repeatcfgcmds();
       mn_waitfornetworkconn(181);
       mn_waitforipaddr(61);
@@ -223,13 +223,28 @@ void app_main(void)
           lastsuccsubmit = time(NULL);
         }
       }
-      rgbled_setled(0, 0, curwifistate * 44);
+      rgbled_setled(0, 0, curwifistate * 33);
     }
-    if ((time(NULL) - lastsuccsubmit) > 1800) {
-      /* We have not successfully submitted any values in 30 minutes.
+    if ((time(NULL) - lastsuccsubmit) > 900) {
+      /* We have not successfully submitted any values in 15 minutes.
        * That probably means that our crappy LTE module has once again locked up.
        * So lets try to tell it to reset, and then reset the ESP. */
-      ESP_LOGE(TAG, "No successful submit in %lld seconds - will now try to reset.", (time(NULL) - lastsuccsubmit));
+      ESP_LOGE(TAG, "No successful submit in %lld seconds - preparing to reset.", (time(NULL) - lastsuccsubmit));
+      /* Keep sending trivial command ("AT") frequently until we
+       * receive a reply (with a long timeout) */
+      int numretries = 0;
+      int mir;
+      do {
+        vTaskDelay(pdMS_TO_TICKS(3333));
+        mn_wakeltemodule();
+        mir = mn_waitforltemoduleready();
+        numretries++;
+      } while ((mir != 0) && (numretries < 200));
+      if (mir == 0) {
+        ESP_LOGI(TAG, "LTE module reported ready after %d retries.", numretries);
+      } else {
+        ESP_LOGI(TAG, "LTE module never reported ready before timeout - this also means reset will most likely fail :(");
+      }
       mn_rebootltemodule();
       esp_restart();
     }

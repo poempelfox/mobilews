@@ -217,7 +217,7 @@ void mn_wakeltemodule(void)
  * 'AT' command we try to send on entering this function (if the hardware FIFO
  * has space for it, if it hasn't, then output has probably been blocked for a
  * long time already and everything is broken anyways). */
-void mn_waitforltemoduleready(void)
+int mn_waitforltemoduleready(void)
 {
   char buf[250];
   int res;

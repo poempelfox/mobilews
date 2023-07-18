@@ -14,8 +14,10 @@ void mn_wakeltemodule(void);
  * powerup-message, or it sends an "OK", which we consider to be a reply to the
  * 'AT' command we try to send on entering this function (if the hardware FIFO
  * has space for it, if it hasn't, then output has probably been blocked for a
- * long time already and everything is broken anyways). */
-void mn_waitforltemoduleready(void);
+ * long time already and everything is broken anyways).
+ * Returns "0" if a sign the module might be ready was received,
+ * or "1" otherwise. */
+int mn_waitforltemoduleready(void);
 
 /* Tries to wait until the mobile network has a data connection, with a timeout.
  * This will also automatically handle the case where the module did a
