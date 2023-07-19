@@ -14,6 +14,10 @@
 #define LTEMCTS 4
 /* We also need an I/O to connect to the "power on" pin of the ublox module. */
 #define LTEMPOWERPIN 5
+/* and another pin to control the relays that can powercycle the ublox
+ * module, because that POS keeps locking up with no way to recover it
+ * in software. */
+#define LTEMRELAYPIN 26
 
 #define LTEMRXQUEUESIZE 1500
 #define LTEMTXQUEUESIZE 0  /* 0 means block until everything is written. */
@@ -173,11 +177,29 @@ int waitforatreplywto(char * buf, int buflen, int timeout)
   return -1;
 }
 
+static void uart_write_bytes_wto(uart_port_t uart_num, const char * s, uint32_t l, int timeout)
+{
+  time_t stts = time(NULL);
+  do {
+    int bs = uart_tx_chars(uart_num, s, l);
+    if (bs >= 0) {
+      l -= bs;
+      s += bs;
+    }
+    if (l > 0) { /* Buffer was not completely written, delay a short time to give it time to flush */
+      sleep_ms(50);
+    }
+  } while ((l > 0) && ((time(NULL) - stts) < timeout));
+  if (l > 0) {
+    ESP_LOGE(TAG, "Serial port lost %lu bytes of data on write due to TX overrun/timeout!", l);
+  }
+}
+
 /* Sends data out the serial port to the LTE modem.
  * Linefeeds already need to be included in line! */
 void sendserialline(char * line)
 {
-  uart_write_bytes(LTEMUART, line, strlen(line));
+  uart_write_bytes_wto(LTEMUART, line, strlen(line), 5);
 }
 
 /* sends an AT command to the LTE module, and waits for it to return a reply,
@@ -233,17 +255,18 @@ int mn_waitforltemoduleready(void)
     if (res >= 19) {
       if (strncmp(buf, "LTEmodule now ready", 19) == 0) {
         ESP_LOGI(TAG, "LTEmodule reported ready.");
-        return;
+        return 0;
       }
     }
     if (res == 2) {
       if (strncmp(buf, "OK", 2) == 0) {
         ESP_LOGI(TAG, "LTEmodule did not report ready but returned 'OK'");
-        return;
+        return 0;
       }
     }
   } while (res >= 0);
   ESP_LOGE(TAG, "Timeout waiting for LTEmodule to report ready.");
+  return 1;
 }
 
 /* Return the network state, as returned in AT+COPS.
@@ -581,6 +604,28 @@ int mn_readsock(int socket, char * buf, int bufsize, int timeout)
   return res;
 }
 
+void mn_powercycleltemodem(void)
+{
+  /* Configure the pin controlling the relays for the LTE modem power. */
+  gpio_config_t ltemrelaypingpioconf = {
+    .intr_type = GPIO_INTR_DISABLE,
+    .mode = GPIO_MODE_OUTPUT, /* output mode, start driving this pin */
+    .pin_bit_mask = (1ULL << LTEMRELAYPIN),
+    .pull_down_en = 0,
+    .pull_up_en = 0,
+  };
+  ESP_ERROR_CHECK(gpio_config(&ltemrelaypingpioconf));
+  ESP_ERROR_CHECK(gpio_set_level(LTEMRELAYPIN, 0));
+  /* Keep this for 5 seconds */
+  sleep_ms(5000);
+  ESP_ERROR_CHECK(gpio_set_level(LTEMRELAYPIN, 1));
+  /* give it 1/3rd of a second to go 'high' */
+  sleep_ms(300);
+  /* Now stop driving that pin. */
+  ltemrelaypingpioconf.mode = GPIO_MODE_DISABLE;
+  ESP_ERROR_CHECK(gpio_config(&ltemrelaypingpioconf));
+}
+
 void mn_init(void)
 {
   /* Let's get serial */
@@ -608,6 +653,15 @@ void mn_init(void)
     .pull_up_en = 0,
   };
   ESP_ERROR_CHECK(gpio_config(&ltempowerpingpioconf));
+  /* Configure the pin controlling the relays for the LTE modem power. */
+  gpio_config_t ltemrelaypingpioconf = {
+    .intr_type = GPIO_INTR_DISABLE,
+    .mode = GPIO_MODE_DISABLE, /* For now we disable this - don't drive or read it, just let it float. */
+    .pin_bit_mask = (1ULL << LTEMRELAYPIN),
+    .pull_down_en = 0,
+    .pull_up_en = 0,
+  };
+  ESP_ERROR_CHECK(gpio_config(&ltemrelaypingpioconf));
 }
 
 void mn_configureltemodule(void)

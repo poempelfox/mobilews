@@ -229,23 +229,9 @@ void app_main(void)
       /* We have not successfully submitted any values in 15 minutes.
        * That probably means that our crappy LTE module has once again locked up.
        * So lets try to tell it to reset, and then reset the ESP. */
-      ESP_LOGE(TAG, "No successful submit in %lld seconds - preparing to reset.", (time(NULL) - lastsuccsubmit));
-      /* Keep sending trivial command ("AT") frequently until we
-       * receive a reply (with a long timeout) */
-      int numretries = 0;
-      int mir;
-      do {
-        vTaskDelay(pdMS_TO_TICKS(3333));
-        mn_wakeltemodule();
-        mir = mn_waitforltemoduleready();
-        numretries++;
-      } while ((mir != 0) && (numretries < 200));
-      if (mir == 0) {
-        ESP_LOGI(TAG, "LTE module reported ready after %d retries.", numretries);
-      } else {
-        ESP_LOGI(TAG, "LTE module never reported ready before timeout - this also means reset will most likely fail :(");
-      }
-      mn_rebootltemodule();
+      ESP_LOGE(TAG, "No successful submit in %lld seconds - about to powercycle the LTE modem and reset.", (time(NULL) - lastsuccsubmit));
+      mn_powercycleltemodem();
+      ESP_LOGE(TAG, "modem powercycled, now resetting the ESP32...");
       esp_restart();
     }
     long howmuchtosleep = (lastmeasts + 60) - time(NULL) - 1;

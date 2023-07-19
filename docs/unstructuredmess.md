@@ -47,8 +47,14 @@ randomly switch between german and english, sorry about that.
     + DFR0627 - this always responds to 8 I2C-addresses, i.e. only the 4 most significant address bits are really address bits and the rest is abused for function selection, but at least we can set 2 of the 4 via DIP switch. We set both to 1, which results in the device taking up the addresses 1110xxxb, or 0x70 to 0x77 (inclusive)
   - Bus 1 (5V powered device with 3.3V I2C level): GPIO11 = SCL, GPIO12 = SDA
     + SEN50 particulate matter sensor - I2C-address: ?
+* relay board for power cycling the LTE module
+  - this is connected up with handmade splittercables
+  - connect the GND pins together: GND on the power distribution board, GND on the relay board, 2x GND on the LTE board
+  - connect each of the two power lines (3.3V, 5V) coming from the power distribution board to the middle pin ("COM" aka Common) of one of the relays
+  - "VCC" on the relay board also needs to be connected to 5V
+  - connect the two "NC" (Normally Closed) pins of the relays to the respective power pins of the LTE board
 * LTE module
-  - the power wires (GND, 5V, 3.3V) should be routed through our distribution board.
+  - the power wires (5V, 3.3V) should be routed through the relay board to our distribution board.
   - ESP32 GPIO1 <-> LTE-module RX
   - ESP32 GPIO2 <-> LTE-module TX
   - ESP32 GPIO3 <-> LTE-module RTS

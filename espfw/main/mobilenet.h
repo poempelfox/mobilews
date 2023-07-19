@@ -63,6 +63,11 @@ int mn_writesock(int socket, char * buf, int bufsize, int timeout);
  */
 int mn_readsock(int socket, char * buf, int bufsize, int timeout);
 
+/* This causes a hard powercycle of the LTE module. Necessary
+ * if that thing crashed yet again and is not software-recoverable,
+ * as usual. */
+void mn_powercycleltemodem(void);
+
 /* This configures the pins / serial UART for the LTE module.
  * This obviously needs to be called before anything else.
  */
