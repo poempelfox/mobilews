@@ -716,10 +716,30 @@ void mn_configureltemodule(void)
   // default to PS due to our european MNOPROFILE.
   sendatcmd("AT+USVCDOMAIN=2", 10);
   // Not sure if the following two are really needed, the ublox
-  // documentation raises more questiosn than it answers, but
+  // documentation raises more questions than it answers, but
   // it probably does not hurt.
   //sendatcmd("AT+USIMSTAT=4", 4);
   //sendatcmd("AT+UCUSATA=4", 4);
+  /* UNTESTED and badly documented territory: Configure powersaving.
+   * The only readable documentation I found was on
+   * https://www.twilio.com/docs/iot/supersim/low-power-optimization-for-cellular-modules
+   * everything ublox provided was useless.
+   * There are two power saving mechanisms that are independant from each other:
+   * PSM and EDRX. The former has higher latency but can save more power. Both
+   * can be combined. And in both cases, you can request things from the network,
+   * but it's always the networks decision if or what values it allows. */
+  sendatcmd("AT+CPSMS?"); // print the old settings before we change them
+  /* par. 2: requested periodic RAU - default "00011000" == 4 hours
+   * par. 3: requested GPRS READY Timer - default "00001010" == 20 seconds.
+   * par. 4: requested periodic TAU - default undocumented, possibly "00010011" == 11400s
+   * par. 5: requested active time - default undocumented, possibly "00000011" == 6s
+   * We should probably increase the GPRS READY timer so we don't have to do
+   * a full reconnect every minute. 00100010 == 2 minutes. */
+  sendatcmd("AT+CPSMS=1,\"00011000\",\"00100010\",\"00010011\",\"00000011\"");
+  sendatcmd("AT+CEDRXS?"); // print the old settings before we change them
+  sendatcmd("AT+CEDRXS=1,2,\"0101\""); // 0101=81.92s, 0011=40.96s
+  sendatcmd("AT+CEDRXS=1,4,\"0101\"");
+  sendatcmd("AT+CEDRXS=1,5,\"0101\"");
   // reboot again to make that take effect
   sendatcmd("AT+CFUN=15", 4);
 #endif /* (RUNONETIMEMODEMCONFIG == 1) - one-off LTE module setup */
