@@ -60,6 +60,21 @@ static const char senshtml_p2[] = R"EOSEHTP2(
 </body></html>
 )EOSEHTP2";
 
+static const char mobstahtml_p1[] = R"EOMSHTP1(
+<!DOCTYPE html>
+
+<html><head><title>Foxis Mobile Weather station - mobile network state</title>
+<link rel="stylesheet" type="text/css" href="/css">
+</head><body>
+<h1>Foxis Mobile WS - mobile state at last send interval</h1>
+Please note that this page does not update automatically - you need to
+hit the reload button in your browser.<br>
+)EOMSHTP1";
+
+static const char mobstahtml_p2[] = R"EOMSHTP2(
+</body></html>
+)EOMSHTP2";
+
 /* *******************************************************************
    ****** end   string definition, mostly for embedded webpages ******
    ******************************************************************* */
@@ -149,7 +164,7 @@ esp_err_t get_sensorshtml_handler(httpd_req_t * req)
   strcpy(myresponse, senshtml_p1);
   pfp = myresponse + strlen(myresponse);
   pfp = printallsensors(0, pfp);
-  strcat(myresponse, senshtml_p2);
+  strcpy(pfp, senshtml_p2);
   /* The following two lines are the default und thus redundant. */
   httpd_resp_set_status(req, "200 OK");
   httpd_resp_set_type(req, "text/html");
@@ -191,6 +206,31 @@ static httpd_uri_t uri_getjson = {
   .user_ctx = NULL
 };
 
+esp_err_t get_mobilestate_handler(httpd_req_t * req)
+{
+  char myresponse[sizeof(mobstahtml_p1) + sizeof(mobstahtml_p2) + MOSTLEN + 500];
+  char * pfp; /* Pointer for (s)printf */
+  int e = activeevs;
+  strcpy(myresponse, mobstahtml_p1);
+  pfp = myresponse + strlen(myresponse);
+  pfp += sprintf(pfp, "lastupdate TS: %lld<br>", evs[e].lastupd);
+  pfp += sprintf(pfp, "status: %s", evs[e].modemstatus);
+  strcpy(pfp, mobstahtml_p2);
+  /* The following two lines are the default und thus redundant. */
+  httpd_resp_set_status(req, "200 OK");
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=29");
+  httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+  return ESP_OK;
+}
+
+static httpd_uri_t uri_getmobilestate = {
+  .uri      = "/mobilestate",
+  .method   = HTTP_GET,
+  .handler  = get_mobilestate_handler,
+  .user_ctx = NULL
+};
+
 
 void webserver_start(void)
 {
@@ -207,7 +247,8 @@ void webserver_start(void)
   }
   httpd_register_uri_handler(server, &uri_startpage);
   httpd_register_uri_handler(server, &uri_getcss);
-  httpd_register_uri_handler(server, &uri_getsensorshtml);
   httpd_register_uri_handler(server, &uri_getjson);
+  httpd_register_uri_handler(server, &uri_getmobilestate);
+  httpd_register_uri_handler(server, &uri_getsensorshtml);
 }
 

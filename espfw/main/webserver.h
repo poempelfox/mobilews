@@ -4,6 +4,9 @@
 #ifndef _WEBSERVER_H_
 #define _WEBSERVER_H_
 
+/* How much memory we reserve for the reported modem status */
+#define MOSTLEN 2048
+
 /* This struct is used to provide data to us.
  * "ev" as in _E_xported _V_alues */
 struct ev {
@@ -21,6 +24,7 @@ struct ev {
   float uvind;  /* UV Index */
   float windspeed;
   float winddirdeg;
+  char modemstatus[MOSTLEN];
 };
 
 /* Initialize and start the Webserver. */

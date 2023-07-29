@@ -115,7 +115,7 @@ void app_main(void)
       float wd = windsens_getwinddir();
       ESP_LOGI(TAG, "|- wind direction: %.1f degrees", wd);
       float ws = windsens_getwindspeed();
-      ESP_LOGI(TAG, "|- wind speed: %.1f m/s  %.2f km/h", ws, (ws * 3600.0 / 1000.0));
+      ESP_LOGI(TAG, "|- wind speed: %.1f m/s (~%.2f km/h)", ws, (ws * 3.6));
       float bv = batsens_read();
       ESP_LOGI(TAG, "|- battery voltage: %.2fV", bv);
       float rgc = rg15_readraincount();
@@ -143,6 +143,8 @@ void app_main(void)
       mn_repeatcfgcmds();
       mn_waitfornetworkconn(181);
       mn_waitforipaddr(61);
+      /* Fetch LTE modem signal info for the webinterface */
+      mn_getmninfo(evs[naevs].modemstatus);
       struct wpd tosubmit[15]; /* we'll submit at most 13 values because we have that many sensors */
       int nts = 0; /* Number of values to submit */
       /* Lets define a little helper macro to limit the copy+paste orgies */

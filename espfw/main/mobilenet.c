@@ -604,6 +604,30 @@ int mn_readsock(int socket, char * buf, int bufsize, int timeout)
   return res;
 }
 
+void mn_getmninfo(char * obuf)
+{
+  char rdstr[500]; int rc;
+  strcpy(obuf, "");
+  sprintf(rdstr, "AT+COPS?\r\n");
+  strcat(obuf, "# AT+COPS?\n");
+  sendserialline(rdstr);
+  rc = waitforatreplywto(rdstr, sizeof(rdstr), 2);
+  if (rc > 0) {
+    strcat(obuf, rdstr);
+  } else {
+    strcat(obuf, "(no reply received)");
+  }
+  sprintf(rdstr, "AT+CESQ\r\n");
+  strcat(obuf, "# AT+CESQ\n");
+  sendserialline(rdstr);
+  rc = waitforatreplywto(rdstr, sizeof(rdstr), 2);
+  if (rc > 0) {
+    strcat(obuf, rdstr);
+  } else {
+    strcat(obuf, "(no reply received)");
+  }
+}
+
 void mn_powercycleltemodem(void)
 {
   /* Configure the pin controlling the relays for the LTE modem power. */

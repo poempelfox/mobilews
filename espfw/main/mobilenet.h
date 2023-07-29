@@ -84,6 +84,9 @@ void mn_repeatcfgcmds(void);
 /* Tells the LTE module to reboot. */
 void mn_rebootltemodule(void);
 
+/* gets info about signal strength / used network from the LTE modem */
+void mn_getmninfo(char * obuf);
+
 /* sends an AT command to the LTE module, and waits for it to return a reply,
  * whether it be an OK or an ERROR. With timeout.
  * Returns <0 if there is an error, but note that error does not mean the
