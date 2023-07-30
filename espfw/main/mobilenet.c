@@ -614,8 +614,10 @@ void mn_getmninfo(char * obuf)
   rc = waitforatreplywto(rdstr, sizeof(rdstr), 2);
   if (rc > 0) {
     strcat(obuf, rdstr);
+    ESP_LOGI(TAG, "mn_getmninfo: %s", rdstr);
   } else {
     strcat(obuf, "(no reply received)");
+    ESP_LOGI(TAG, "mn_getmninfo: AT+COPS? failed.");
   }
   sprintf(rdstr, "AT+CESQ\r\n");
   strcat(obuf, "# AT+CESQ\n");
@@ -623,8 +625,10 @@ void mn_getmninfo(char * obuf)
   rc = waitforatreplywto(rdstr, sizeof(rdstr), 2);
   if (rc > 0) {
     strcat(obuf, rdstr);
+    ESP_LOGI(TAG, "mn_getmninfo: %s", rdstr);
   } else {
     strcat(obuf, "(no reply received)");
+    ESP_LOGI(TAG, "mn_getmninfo: AT+CESQ failed.");
   }
 }
 
