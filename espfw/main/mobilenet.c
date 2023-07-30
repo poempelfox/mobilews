@@ -709,7 +709,7 @@ void mn_configureltemodule(void)
   sendatcmd("AT+UMNOPROF=100", 4);
   // reboot to make that take effect
   sendatcmd("AT+CFUN=15", 4);
-  waitforltemoduleready();
+  mn_waitforltemoduleready();
   sendatcmd("AT", 4);
   // disconnect from network, needed for the following
   sendatcmd("AT+CFUN=0", 10);
@@ -727,7 +727,7 @@ void mn_configureltemodule(void)
   sendatcmd("AT+CGDCONT=1,\"IP\",\"resiot.m2m\"", 10);
   // reboot again to make that take effect
   sendatcmd("AT+CFUN=15", 4);
-  waitforltemoduleready();
+  mn_waitforltemoduleready();
   sendatcmd("AT", 4);
   // disconnect from network, needed for the following
   sendatcmd("AT+CFUN=0", 10);
@@ -752,18 +752,24 @@ void mn_configureltemodule(void)
    * PSM and EDRX. The former has higher latency but can save more power. Both
    * can be combined. And in both cases, you can request things from the network,
    * but it's always the networks decision if or what values it allows. */
-  sendatcmd("AT+CPSMS?"); // print the old settings before we change them
+  sendatcmd("AT+CPSMS?", 10); // print the old settings before we change them
+  /* Note: Actual reply to that from our module with our SIM:
+   * +CPSMS:0,"01100000","00000000",,"00000000" */
   /* par. 2: requested periodic RAU - default "00011000" == 4 hours
    * par. 3: requested GPRS READY Timer - default "00001010" == 20 seconds.
    * par. 4: requested periodic TAU - default undocumented, possibly "00010011" == 11400s
    * par. 5: requested active time - default undocumented, possibly "00000011" == 6s
    * We should probably increase the GPRS READY timer so we don't have to do
    * a full reconnect every minute. 00100010 == 2 minutes. */
-  sendatcmd("AT+CPSMS=1,\"00011000\",\"00100010\",\"00010011\",\"00000011\"");
-  sendatcmd("AT+CEDRXS?"); // print the old settings before we change them
-  sendatcmd("AT+CEDRXS=1,2,\"0101\""); // 0101=81.92s, 0011=40.96s
-  sendatcmd("AT+CEDRXS=1,4,\"0101\"");
-  sendatcmd("AT+CEDRXS=1,5,\"0101\"");
+  sendatcmd("AT+CPSMS=1,\"00011000\",\"00100010\",\"00010011\",\"00000011\"", 10);
+  sendatcmd("AT+CEDRXS?", 10); // print the old settings before we change them
+  /* Note: Actual reply to that from our module with our SIM:
+   * +CEDRXS: 2,"0010"
+   * +CEDRXS: 4,"0010"
+   * +CEDRXS: 5,"0010" */
+  sendatcmd("AT+CEDRXS=1,2,\"0101\"", 10); // 0101=81.92s, 0011=40.96s
+  sendatcmd("AT+CEDRXS=1,4,\"0101\"", 10);
+  sendatcmd("AT+CEDRXS=1,5,\"0101\"", 10);
   // reboot again to make that take effect
   sendatcmd("AT+CFUN=15", 4);
 #endif /* (RUNONETIMEMODEMCONFIG == 1) - one-off LTE module setup */
