@@ -4,6 +4,8 @@
 #include <math.h>
 #include <time.h>
 #include "webserver.h"
+#include "mobilenet.h"
+#include "secrets.h"
 
 /* These are in main.c */
 extern struct ev evs[2];
@@ -26,10 +28,9 @@ This is the debug interface for Foxis Mobile Weather station.<br>
 <a href="/mobilestate">Mobile network state</a><br>
 <br>
 Log in to Admin Interface:<br>
-<form action="/admin" method="POST">
+<form action="/adminmenu" method="POST">
 Admin-Password:
-<input type="text" name="adminpw">
-<input type="hidden" name="action" value="overview">
+<input type="password" name="adminpw">
 <input type="submit" name="su" value="Log In">
 </form>
 </body></html>
@@ -74,6 +75,32 @@ hit the reload button in your browser.<br>
 static const char mobstahtml_p2[] = R"EOMSHTP2(
 </body></html>
 )EOMSHTP2";
+
+static const char admmenhtml_p1[] = R"EOADMMHTP1(
+<!DOCTYPE html>
+
+<html><head><title>Foxis Mobile Weather station - admin menu</title>
+<link rel="stylesheet" type="text/css" href="/css">
+</head><body>
+<h1>Foxis Mobile WS - admin menu</h1>
+Welcome, Admin. Here are some things you can do:<br>
+<h2>Manually select a network</h2>
+<form action="/adminqueuecmd" method="POST">
+)EOADMMHTP1";
+
+static const char admmenhtml_p2[] = R"EOADMMHTP2(
+<input type="hidden" name="mode" value="opsel">
+<select name="operator">
+<option value="NULL">Reset to automatic operator selection</option>
+<option value="26201">Telekom DE</option>
+<option value="26202">Vodafone DE</option>
+<option value="26203">Telefonica DE</option>
+</select>
+<input type="checkbox" name="permanent" value="1"> permanent
+<input type="submit" name="su" value="Execute">
+</form>
+</body></html>
+)EOADMMHTP2";
 
 /* *******************************************************************
    ****** end   string definition, mostly for embedded webpages ******
@@ -137,7 +164,8 @@ static char * printallsensors(int t, char * pfp)
 {
   int e = activeevs;
   if (t == 0) { /* HTML */
-    pfp += sprintf(pfp, "<tr><th>ts</th><td>%lld</td></tr>", evs[e].lastupd);
+    pfp += sprintf(pfp, "<tr><th>ts</th><td>%lld (%lld seconds ago)</td></tr>",
+                        evs[e].lastupd, (time(NULL) - evs[e].lastupd));
   } else { /* JSON */
     pfp += sprintf(pfp, "\"ts\":\"%lld\",", evs[e].lastupd);
   }
@@ -213,8 +241,9 @@ esp_err_t get_mobilestate_handler(httpd_req_t * req)
   int e = activeevs;
   strcpy(myresponse, mobstahtml_p1);
   pfp = myresponse + strlen(myresponse);
-  pfp += sprintf(pfp, "lastupdate TS: %lld<br>", evs[e].lastupd);
-  pfp += sprintf(pfp, "status: %s", evs[e].modemstatus);
+  pfp += sprintf(pfp, "lastupdate TS: %lld (%lld seconds ago)<br>",
+                      evs[e].lastupd, (time(NULL) - evs[e].lastupd));
+  pfp += sprintf(pfp, "status:<br><pre>%s</pre>", evs[e].modemstatus);
   strcpy(pfp, mobstahtml_p2);
   /* The following two lines are the default und thus redundant. */
   httpd_resp_set_status(req, "200 OK");
@@ -228,6 +257,148 @@ static httpd_uri_t uri_getmobilestate = {
   .uri      = "/mobilestate",
   .method   = HTTP_GET,
   .handler  = get_mobilestate_handler,
+  .user_ctx = NULL
+};
+
+/* Unescapes a x-www-form-urlencoded string.
+ * Modifies the string inplace! */
+void unescapeuestring(char * s) {
+  char * rp = s;
+  char * wp = s;
+  while (*rp != 0) {
+    if (strncmp(rp, "&amp;", 5) == 0) {
+      *wp = '&'; rp += 5; wp += 1;
+    } else if (strncmp(rp, "%26", 3) == 0) {
+      *wp = '&'; rp += 3; wp += 1;
+    } else if (strncmp(rp, "%3A", 3) == 0) {
+      *wp = ':'; rp += 3; wp += 1;
+    } else if (strncmp(rp, "%2F", 3) == 0) {
+      *wp = '/'; rp += 3; wp += 1;
+    } else {
+      *wp = *rp; wp++; rp++;
+    }
+  }
+  *wp = 0;
+}
+
+#define POSTCONTMAXLEN 600
+int parsepostandcheckauth(httpd_req_t * req, char * postcontent)
+{
+  char tmp1[100];
+  if (req->content_len >= POSTCONTMAXLEN) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    const char myresponse[] = "Sorry, your request was too large.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return 1;
+  }
+  int ret = httpd_req_recv(req, postcontent, req->content_len);
+  if (ret < req->content_len) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    const char myresponse[] = "Your request was incompletely received.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return 1;
+  }
+  postcontent[req->content_len] = 0;
+  ESP_LOGI("webserver.c", "Received data: '%s'", postcontent);
+  if (httpd_query_key_value(postcontent, "adminpw", tmp1, sizeof(tmp1)) != ESP_OK) {
+    httpd_resp_set_status(req, "403 Forbidden");
+    const char myresponse[] = "Permission denied - no adminpw submitted.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return 1;
+  }
+  unescapeuestring(tmp1);
+  if (strcmp(tmp1, MOBILEWS_WEBIFADMINPW) != 0) {
+    ESP_LOGI("webserver.c", "Incorrect AdminPW - UE: '%s'", tmp1);
+    httpd_resp_set_status(req, "403 Forbidden");
+    const char myresponse[] = "Admin-Password incorrect.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return 1;
+  }
+  return 0;
+}
+
+esp_err_t post_adminmenu(httpd_req_t * req) {
+  char postcontent[POSTCONTMAXLEN];
+  char myresponse[3000];
+  char * pfp; /* Pointer for (s)printf */
+  if (parsepostandcheckauth(req, postcontent) != 0) {
+    return ESP_OK;
+  }
+  strcpy(myresponse, admmenhtml_p1);
+  pfp = myresponse + strlen(myresponse);
+  pfp += sprintf(pfp, "<input type=\"hidden\" name=\"adminpw\" value=\"%s\">", MOBILEWS_WEBIFADMINPW);
+  strcpy(pfp, admmenhtml_p2);
+  /* The following two lines are the default und thus redundant. */
+  httpd_resp_set_status(req, "200 OK");
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=29");
+  httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+  return ESP_OK;
+}
+
+static httpd_uri_t uri_postadminmenu = {
+  .uri      = "/adminmenu",
+  .method   = HTTP_POST,
+  .handler  = post_adminmenu,
+  .user_ctx = NULL
+};
+
+esp_err_t post_adminqueuecmd(httpd_req_t * req) {
+  char postcontent[POSTCONTMAXLEN];
+  char mode[20];
+  if (parsepostandcheckauth(req, postcontent) != 0) {
+    return ESP_OK;
+  }
+  if (httpd_query_key_value(postcontent, "mode", mode, sizeof(mode)) != ESP_OK) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    const char myresponse[] = "No mode selected.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+  }
+  if (strcmp(mode, "opsel") == 0) {
+    char operator[20];
+    int res = 0;
+    if (httpd_query_key_value(postcontent, "operator", operator, sizeof(operator)) != ESP_OK) {
+      httpd_resp_set_status(req, "400 Bad Request");
+      const char myresponse[] = "No operator selected.";
+      httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+      return ESP_OK;
+    }
+    if (strcmp(operator, "NULL") == 0) {
+      res = mn_queuecommand("AT+COPS=0,0\r\n");
+    } else {
+      char permanent[20];
+      char cmdtoq[40];
+      if (httpd_query_key_value(postcontent, "permanent", permanent, sizeof(permanent)) != ESP_OK) {
+        strcpy(permanent, "0");
+      }
+      sprintf(cmdtoq, "AT+COPS=%d,2,\"%s\"\r\n",
+                      (strcmp(permanent, "1") == 0) ? 1 : 4, operator);
+      res = mn_queuecommand(cmdtoq);
+    }
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_type(req, "text/html");
+    if (res == 0) {
+      const char myresponse[] = "A command has been queued.";
+      httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    } else {
+      const char myresponse[] = "Failed to queue command (buffer full).";
+      httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+  } else {
+    httpd_resp_set_status(req, "400 Bad Request");
+    const char myresponse[] = "No valid mode selected.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+  }
+  return ESP_OK;
+}
+
+static httpd_uri_t uri_postadminqueuecmd = {
+  .uri      = "/adminqueuecmd",
+  .method   = HTTP_POST,
+  .handler  = post_adminqueuecmd,
   .user_ctx = NULL
 };
 
@@ -250,5 +421,7 @@ void webserver_start(void)
   httpd_register_uri_handler(server, &uri_getjson);
   httpd_register_uri_handler(server, &uri_getmobilestate);
   httpd_register_uri_handler(server, &uri_getsensorshtml);
+  httpd_register_uri_handler(server, &uri_postadminmenu);
+  httpd_register_uri_handler(server, &uri_postadminqueuecmd);
 }
 

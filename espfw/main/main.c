@@ -67,16 +67,6 @@ void app_main(void)
   mn_wakeltemodule();
   /* Send setup commands to the IoT 6 click (uBlox Sara-R412M) module */
   mn_configureltemodule();
-#if 0
-  /* wait for network connection (but with timeout).
-   * We don't really care if this succeeds or not, we'll just try to send
-   * data anyways. */
-  mn_waitfornetworkconn(181);
-  mn_waitforipaddr(61);
-  // Query status info - this is only for debugging really.
-  sendatcmd("AT+CGACT?", 4);
-  sendatcmd("AT+CGDCONT?", 4);
-#endif
 
   time_t lastmeasts = time(NULL);
   time_t lastsuccsubmit = time(NULL);
@@ -141,6 +131,7 @@ void app_main(void)
       mn_waitforltemoduleready();
       rgbled_setled(33, 33, 0); /* Yellow - we're sending */
       mn_repeatcfgcmds();
+      mn_sendqueuedcommands();
       mn_waitfornetworkconn(181);
       mn_waitforipaddr(61);
       /* Fetch LTE modem signal info for the webinterface */
