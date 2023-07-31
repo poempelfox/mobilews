@@ -1,8 +1,10 @@
+#include <driver/uart.h>
+#include <driver/gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <driver/uart.h>
-#include <driver/gpio.h>
 #include "esp_log.h"
 #include "mobilenet.h"
 
@@ -37,6 +39,8 @@ static const char *TAG = "mobilenet";
 static char serialinlinebuf[500];
 static int serialinlbpos = 0;
 static int serialinlblav = 0;
+static char queuedcommands[100];
+static portMUX_TYPE cmdqueuespinlock = portMUX_INITIALIZER_UNLOCKED;
 
 /* removes all occurences of char b from string a. */
 static void delchar(char * a, char b) {
@@ -816,3 +820,29 @@ void mn_rebootltemodule(void)
   sendatcmd("AT+CFUN=16", 4);
 }
 
+int mn_queuecommand(char * cmd)
+{
+  int res = 0;
+  taskENTER_CRITICAL(&cmdqueuespinlock);
+  /* Do NOT call any of the ESP_LOG functions while holding the lock! */
+  if ((strlen(cmd) + strlen(queuedcommands) + 1) < sizeof(queuedcommands)) {
+    strcat(queuedcommands, cmd);
+    ESP_LOGI(TAG, "Successfully queued command '%s' for sending to LTE module.", cmd);
+  } else {
+    ESP_LOGI(TAG, "Could not queue command '%s' because buffer does not have enough space.", cmd);
+    res = 1;
+  }
+  taskEXIT_CRITICAL(&cmdqueuespinlock);
+  return res;
+}
+
+void mn_sendqueuedcommands(void)
+{
+  taskENTER_CRITICAL(&cmdqueuespinlock);
+  if (strlen(queuedcommands) > 0) {
+    ESP_LOGI(TAG, "Sending queued command(s): '%s'", queuedcommands);
+    sendserialline(queuedcommands);
+    strcpy(queuedcommands, "");
+  }
+  taskEXIT_CRITICAL(&cmdqueuespinlock);
+}

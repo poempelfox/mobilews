@@ -87,6 +87,16 @@ void mn_rebootltemodule(void);
 /* gets info about signal strength / used network from the LTE modem */
 void mn_getmninfo(char * obuf);
 
+/* Queues a command to be sent to the LTE module later.
+ * This is meant to be used by e.g. the webserver to queue a command
+ * for selecting a specific mobile network.
+ * Returns 0 on success or 1 on error (not enough bufferspace) */
+int mn_queuecommand(char * cmd);
+
+/* Sends the commands queued by mn_queuecommand to the LTE module
+ * (if none are queued this is just a noop) */
+void mn_sendqueuedcommands(void);
+
 /* sends an AT command to the LTE module, and waits for it to return a reply,
  * whether it be an OK or an ERROR. With timeout.
  * Returns <0 if there is an error, but note that error does not mean the
