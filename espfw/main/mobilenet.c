@@ -827,22 +827,27 @@ int mn_queuecommand(char * cmd)
   /* Do NOT call any of the ESP_LOG functions while holding the lock! */
   if ((strlen(cmd) + strlen(queuedcommands) + 1) < sizeof(queuedcommands)) {
     strcat(queuedcommands, cmd);
-    ESP_LOGI(TAG, "Successfully queued command '%s' for sending to LTE module.", cmd);
   } else {
-    ESP_LOGI(TAG, "Could not queue command '%s' because buffer does not have enough space.", cmd);
     res = 1;
   }
   taskEXIT_CRITICAL(&cmdqueuespinlock);
+  if (res == 0) {
+    ESP_LOGI(TAG, "Successfully queued command '%s' for sending to LTE module.", cmd);
+  } else {
+    ESP_LOGI(TAG, "Could not queue command '%s' because buffer does not have enough space.", cmd);
+  }
   return res;
 }
 
 void mn_sendqueuedcommands(void)
 {
+  char qccopy[sizeof(queuedcommands)];
   taskENTER_CRITICAL(&cmdqueuespinlock);
   if (strlen(queuedcommands) > 0) {
-    ESP_LOGI(TAG, "Sending queued command(s): '%s'", queuedcommands);
     sendserialline(queuedcommands);
+    strcpy(qccopy, queuedcommands);
     strcpy(queuedcommands, "");
   }
   taskEXIT_CRITICAL(&cmdqueuespinlock);
+  ESP_LOGI(TAG, "Sendt queued command(s): '%s'", qccopy);
 }
