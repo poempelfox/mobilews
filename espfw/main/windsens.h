@@ -24,5 +24,13 @@ float windsens_getwinddir(void);
  * will run for a while. */
 float windsens_getwindspeed(void);
 
+/* Returns the wind speed - in meters per second (m/s).
+ * Returns <0.0 on error.
+ * This does multiple samples over timeout seconds, averaging
+ * the result.
+ * Note that the given timeout may be exceeded by a short time (ca. 3 seconds).
+ */
+float windsens_getwindsp_multisample(long timeout);
+
 #endif /* _WINDSENS_H_ */
 

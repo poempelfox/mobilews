@@ -104,7 +104,7 @@ void app_main(void)
       ESP_LOGI(TAG, "|- press %.3lfhPa", press);
       float wd = windsens_getwinddir();
       ESP_LOGI(TAG, "|- wind direction: %.1f degrees", wd);
-      float ws = windsens_getwindspeed();
+      float ws = windsens_getwindsp_multisample(3);
       ESP_LOGI(TAG, "|- wind speed: %.1f m/s (~%.2f km/h)", ws, (ws * 3.6));
       float bv = batsens_read();
       ESP_LOGI(TAG, "|- battery voltage: %.2fV", bv);

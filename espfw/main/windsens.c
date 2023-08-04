@@ -211,12 +211,33 @@ float windsens_getwindspeed(void)
                            rcvbuf[0], rcvbuf[1], rcvbuf[2], rcvbuf[3],
                            rcvbuf[4], rcvbuf[5], rcvbuf[6]);
       ESP_LOGE("windsens.c", " `- calculated CRC: %04x", crc);
-      return -1;
+      return -1.0;
     }
     int calcsp = (rcvbuf[3] * 256) + rcvbuf[4];
     return ((float)calcsp / 10.0);
   }
   ESP_LOGE("windsens.c", "No (valid) reply received from wind-speed-sensor (%d bytes)", bav);
   return -1.0;
+}
+
+float windsens_getwindsp_multisample(long timeout)
+{
+  double summedres = 0.0;
+  unsigned long nsamp = 0;
+  time_t stts = time(NULL);
+  do {
+    float s = windsens_getwindspeed();
+    if (s >= -0.1) { /* That was a valid reading */
+      summedres += s;
+      nsamp++;
+    }
+  } while ((time(NULL) - stts) <= timeout);
+  ESP_LOGI("windsens.c", "windsens_getwindsp_multisample(): %lu successful reads in %ld seconds sum %lf",
+           nsamp, timeout, summedres);
+  if (nsamp > 0) {
+    return (summedres / (double)nsamp);
+  } else {
+    return -1.0;
+  }
 }
 
