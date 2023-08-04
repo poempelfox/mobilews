@@ -844,10 +844,20 @@ void mn_sendqueuedcommands(void)
   char qccopy[sizeof(queuedcommands)];
   taskENTER_CRITICAL(&cmdqueuespinlock);
   if (strlen(queuedcommands) > 0) {
-    sendserialline(queuedcommands);
     strcpy(qccopy, queuedcommands);
     strcpy(queuedcommands, "");
+    taskEXIT_CRITICAL(&cmdqueuespinlock);
+    sendserialline(qccopy);
+    ESP_LOGI(TAG, "Sent queued command(s): '%s'", qccopy);
+    /* wait for a short time and print reply if any */
+    char rcvbuf[300];
+    int res = waitforatreplywto(&rcvbuf[0], sizeof(rcvbuf), 10);
+    if (res > 0) {
+      ESP_LOGI(TAG, "received after queued command: '%s'", rcvbuf);
+    } else {
+      ESP_LOGI(TAG, "no (immediate) reply to queued command.");
+    }
+  } else {
+    taskEXIT_CRITICAL(&cmdqueuespinlock);
   }
-  taskEXIT_CRITICAL(&cmdqueuespinlock);
-  ESP_LOGI(TAG, "Sendt queued command(s): '%s'", qccopy);
 }
