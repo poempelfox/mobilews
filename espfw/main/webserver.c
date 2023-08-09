@@ -10,6 +10,8 @@
 /* These are in main.c */
 extern struct ev evs[2];
 extern int activeevs;
+/* also in main.c - we set this to turn on or off WiFi. */
+extern int nextwifistate;
 
 /* *******************************************************************
    ****** begin string definition, mostly for embedded webpages ******
@@ -95,12 +97,28 @@ static const char admmenhtml_p2[] = R"EOADMMHTP2(
 <option value="26201">Telekom DE</option>
 <option value="26202">Vodafone DE</option>
 <option value="26203">Telefonica DE</option>
+<option value="20408">KPN NL</option>
+<option value="20404">VOdafone NL</option>
+<option value="20416">T-Mobile NL A</option>
+<option value="20402">T-Mobile NL B</option>
 </select>
 <input type="checkbox" name="permanent" value="1"> permanent
 <input type="submit" name="su" value="Execute">
-</form>
-</body></html>
+</form><br>
+<h2>Misc commands</h2>
+<form action="/adminmisccmd" method="POST">
 )EOADMMHTP2";
+
+static const char admmenhtml_p3[] = R"EOADMMHTP3(
+<select name="cmd">
+<option value="1">Reset LTE modem and reboot ESP32</option>
+<option value="2">Reboot ESP32 without resetting LTE modem</option>
+<option value="3">Turn off WiFi</option>
+</select>
+<input type="submit" name="su" value="Execute">
+</form></br>
+</body></html>
+)EOADMMHTP3";
 
 /* *******************************************************************
    ****** end   string definition, mostly for embedded webpages ******
@@ -328,6 +346,8 @@ esp_err_t post_adminmenu(httpd_req_t * req) {
   pfp = myresponse + strlen(myresponse);
   pfp += sprintf(pfp, "<input type=\"hidden\" name=\"adminpw\" value=\"%s\">", MOBILEWS_WEBIFADMINPW);
   strcpy(pfp, admmenhtml_p2);
+  pfp += sprintf(pfp, "<input type=\"hidden\" name=\"adminpw\" value=\"%s\">", MOBILEWS_WEBIFADMINPW);
+  strcpy(pfp, admmenhtml_p3);
   /* The following two lines are the default und thus redundant. */
   httpd_resp_set_status(req, "200 OK");
   httpd_resp_set_type(req, "text/html");
@@ -402,6 +422,56 @@ static httpd_uri_t uri_postadminqueuecmd = {
   .user_ctx = NULL
 };
 
+esp_err_t post_adminmisccmd(httpd_req_t * req) {
+  char postcontent[POSTCONTMAXLEN];
+  char cmd[20];
+  if (parsepostandcheckauth(req, postcontent) != 0) {
+    return ESP_OK;
+  }
+  if (httpd_query_key_value(postcontent, "cmd", cmd, sizeof(cmd)) != ESP_OK) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    const char myresponse[] = "No vmd selected.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+  }
+  if ((strcmp(cmd, "1") == 0)
+   || (strcmp(cmd, "2") == 0)) {
+    ESP_LOGE("webserver.c", "Resetting due to admin request");
+    if (strcmp(cmd, "1") == 0) {
+      ESP_LOGE("webserver.c", "powercycling modem...");
+      mn_powercycleltemodem();
+    }
+    ESP_LOGE("webserver.c", "Now rebooting the ESP32...");
+    esp_restart();
+    /* This should not be reached. */
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_type(req, "text/html");
+    const char myresponse[] = "Reset done.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+  } else if (strcmp(cmd, "3") == 0) { /* Turn off WiFi */
+    nextwifistate = 0;
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_type(req, "text/html");
+    const char myresponse[] = "OK, WiFi will turn off on next main loop iteration.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+  } else {
+    httpd_resp_set_status(req, "400 Bad Request");
+    const char myresponse[] = "No valid mode selected.";
+    httpd_resp_send(req, myresponse, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+  }
+  return ESP_OK;
+}
+
+static httpd_uri_t uri_postadminmisccmd = {
+  .uri      = "/adminmisccmd",
+  .method   = HTTP_POST,
+  .handler  = post_adminmisccmd,
+  .user_ctx = NULL
+};
+
 
 void webserver_start(void)
 {
@@ -423,5 +493,6 @@ void webserver_start(void)
   httpd_register_uri_handler(server, &uri_getsensorshtml);
   httpd_register_uri_handler(server, &uri_postadminmenu);
   httpd_register_uri_handler(server, &uri_postadminqueuecmd);
+  httpd_register_uri_handler(server, &uri_postadminmisccmd);
 }
 
