@@ -71,8 +71,8 @@ static uint8_t alsgainsetting;
 /* FIXME: these were determined experimentally, but under
  * very suboptimal conditions (artifical lighting in the middle
  * of winter). We should probably redo these in summer. */
-const double glassfactoral = 1.070; /* for Ambient light */
-const double glassfactoruv = 1.102; /* for UV */
+const double glassfactoral = 1.0; /* for Ambient light */
+const double glassfactoruv = 0.5; /* for UV */
 
 static esp_err_t ltr390_writereg(uint8_t reg, uint8_t val)
 {
