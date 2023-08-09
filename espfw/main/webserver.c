@@ -346,6 +346,7 @@ esp_err_t post_adminmenu(httpd_req_t * req) {
   pfp = myresponse + strlen(myresponse);
   pfp += sprintf(pfp, "<input type=\"hidden\" name=\"adminpw\" value=\"%s\">", MOBILEWS_WEBIFADMINPW);
   strcpy(pfp, admmenhtml_p2);
+  pfp = myresponse + strlen(myresponse);
   pfp += sprintf(pfp, "<input type=\"hidden\" name=\"adminpw\" value=\"%s\">", MOBILEWS_WEBIFADMINPW);
   strcpy(pfp, admmenhtml_p3);
   /* The following two lines are the default und thus redundant. */
