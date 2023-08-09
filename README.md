@@ -19,7 +19,9 @@ As of August 2023, we have built a somewhat working version. There are certainly
 a lot of bugs still to iron out, the case is not properly finished, and it has
 no feet yet which is why it will need to be placed on a camping table, but it
 should be ready for a first limited test run at CCCamp23.
-More info might be in the docs directory.
+
+More info might be in the `docs` directory, more specifically `docs/unstructuredmess.md`.
+
 
 ## Features
 
@@ -28,12 +30,19 @@ More info might be in the docs directory.
 * can measure the following
   - temperature
   - humidity
-  - 
+  - pressure
+  - particulate matter
+  - wind direction
+  - wind speed (with limitations)
+  - ambient light
+  - ultraviolet light (UV index)
+* management interface on WiFi
+
 
 ## People
 
-in alphabetical order
+The following people contributed mayor parts to this project, in alphabetical order:
 
 * arw (woodwork, assembly)
 * str3yt (woodwork, assembly)
-* PoempelFox (firmware)
+* PoempelFox (firmware, all parts of the hardware powered by electricity)
