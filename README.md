@@ -3,9 +3,9 @@
 
 ## Intro and status
 
-[picture showing the mobile weatherstation on top of a hill at chaos communication camp 2023](docs/mobilews-cccamp23-1.jpg)
+![picture showing the mobile weatherstation on top of a hill at chaos communication camp 2023](docs/mobilews-cccamp23-1.jpg)
 
-[picture showing a closeup of the mobile weatherstation at cccamp23](docs/mobilews-cccamp23-2.jpg)
+![picture showing a closeup of the mobile weatherstation at cccamp23](docs/mobilews-cccamp23-2.jpg)
 
 The goal of this project is to build a weatherstation, that can be
 transported to events, like Chaos Communication Camp, or to
