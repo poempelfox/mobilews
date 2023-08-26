@@ -19,12 +19,13 @@ that would normally be available at chaos- and similiar events. That this means
 the weather station can already work before any infrastructure is in place is
 an additional plus.
 
-As of August 2023, we have built a somewhat working version. There are certainly
-a lot of bugs still to iron out, the case is not properly finished, and it has
-no feet yet which is why it will need to be placed on a camping table, but it
-should be ready for a first limited test run at CCCamp23.
-
 More info might be in the `docs` directory, more specifically `docs/unstructuredmess.md`.
+
+As of August 2023, we have built a somewhat working version. There were certainly
+a lot of bugs still to iron out, the case was not properly finished, and it had
+no feet yet which is why it needed to be placed on a plastic box, but it
+was ready for a first limited test run at CCCamp23. The result of that test run
+can be seen in https://wetter.poempelfox.de/static/camp2023.html
 
 
 ## Features
@@ -48,5 +49,6 @@ More info might be in the `docs` directory, more specifically `docs/unstructured
 The following people contributed mayor parts to this project, in alphabetical order:
 
 * arw (woodwork, assembly)
-* str3yt (woodwork, assembly)
 * PoempelFox (firmware, all parts of the hardware powered by electricity)
+* str3yt (woodwork, assembly)
+
